@@ -76,10 +76,10 @@ struct MenuContent: View {
             } else {
                 VStack(alignment: .leading, spacing: 12) {
                     if let notice { notice }
+                    if settings.collectStats { todayPanel }
                     appCard
                     writingCard
-                    if settings.collectStats { todayRow }
-                    improveButton
+                    improveButton.padding(.top, 2)
                 }
                 .padding(.horizontal, 14).padding(.bottom, 12)
             }
@@ -270,22 +270,39 @@ struct MenuContent: View {
 
     // MARK: Today
 
-    private var todayRow: some View {
+    /// Read-only numbers, kept apart from the controls: a tinted panel (controls sit on neutral cards), big figures,
+    /// and the only thing to click is the "Stats" link beside the caption.
+    @ViewBuilder
+    private var todayPanel: some View {
         let today = stats.summary(.day).total
-        return Button { closeMenu(); AppDelegate.shared?.showSettings(.stats) } label: {
-            HStack(spacing: 0) {
-                Text("Today").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).frame(width: 52, alignment: .leading)
-                StatChip(value: today.words, label: "words")
-                StatChip(value: today.fixedTotal, label: "fixes")
-                StatChip(value: today.rewrites, label: "rewrites")
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+        HStack(alignment: .firstTextBaseline) {
+            Caption("Today")
+            Spacer()
+            Button { closeMenu(); AppDelegate.shared?.showSettings(.stats) } label: {
+                HStack(spacing: 2) {
+                    Text("Stats")
+                    Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.accent)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 2)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .help("See your writing stats")
+            .padding(.bottom, -6)
+            .padding(.trailing, 4)
         }
-        .buttonStyle(.plain)
-        .help("See your writing stats")
+        HStack(spacing: 0) {
+            Metric(value: today.words, label: "Words", symbol: "text.word.spacing", color: Theme.accent)
+            MetricDivider()
+            Metric(value: today.fixedTotal, label: "Fixes", symbol: "checkmark.circle.fill", color: .green)
+            MetricDivider()
+            Metric(value: today.rewrites, label: "Rewrites", symbol: "sparkles", color: Color(nsColor: Theme.purple))
+        }
+        .padding(.vertical, 10)
+        .background(Theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Today: \(today.words) words, \(today.fixedTotal) fixes, \(today.rewrites) rewrites")
     }
 
     // MARK: Main action
@@ -413,16 +430,29 @@ struct ToneMenu: View {
     }
 }
 
-private struct StatChip: View {
+/// One figure in the Today panel: the number large, what it counts small underneath.
+private struct Metric: View {
     var value: Int
     var label: String
+    var symbol: String
+    var color: Color
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 3) {
-            Text(value.formatted()).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
-            Text(label).font(.system(size: 11)).foregroundStyle(.secondary)
+        VStack(spacing: 3) {
+            Text(value.formatted(.number.notation(.compactName)))
+                .font(.system(size: 20, weight: .semibold, design: .rounded)).monospacedDigit()
+                .foregroundStyle(value == 0 ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                .contentTransition(.numericText())
+            HStack(spacing: 3) {
+                Image(systemName: symbol).font(.system(size: 9, weight: .semibold)).foregroundStyle(color.opacity(value == 0 ? 0.5 : 1))
+                Text(label).font(.system(size: 10.5, weight: .medium)).foregroundStyle(.secondary)
+            }
         }
-        .padding(.trailing, 12)
+        .frame(maxWidth: .infinity)
     }
+}
+
+private struct MetricDivider: View {
+    var body: some View { Rectangle().fill(Color.primary.opacity(0.08)).frame(width: 1, height: 28) }
 }
 
 private struct FooterLabel: View {
@@ -459,12 +489,15 @@ struct Notice: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: symbol).foregroundStyle(color).font(.system(size: 14))
-            Text(text).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+            Image(systemName: symbol).foregroundStyle(color).font(.system(size: 12, weight: .semibold))
+                .frame(width: 26, height: 26)
+                .background(color.opacity(0.15), in: Circle())
+            Text(text).font(.system(size: 11.5)).foregroundStyle(.primary.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             Button(button, action: action).buttonStyle(SecondaryButtonStyle())
         }
         .padding(10)
-        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(color.opacity(0.35)))
     }
 }
