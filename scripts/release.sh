@@ -23,7 +23,7 @@ die() { echo "release: $*" >&2; exit 1; }
 # The notes for one version: everything under its heading, up to the next "## [" heading.
 notes() { awk -v v="$1" '
     $0 ~ "^## \\[" v "\\]" { on = 1; next }
-    on && /^## \[/ { exit }
+    on && (/^## \[/ || /^\[[^]]+\]: /) { exit }
     on { print }' CHANGELOG.md | sed -e '/./,$!d'; }
 
 publish() {
