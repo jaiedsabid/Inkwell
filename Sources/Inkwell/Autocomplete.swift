@@ -179,7 +179,19 @@ final class Autocomplete {
         let s = clean(r.completion, after: before, length: length)
         // Longer guesses need to be near-certain; short ones can be "very likely".
         if r.confidence == 4, s.split(separator: " ").count > 3 { return "" }
-        return isGrounded(s, in: before) ? s : ""
+        if isGrounded(s, in: before) { return s }
+        return groundedPrefix(s, in: before)
+    }
+
+    /// The part of a suggestion before its first invented fact ("is scheduled for Tuesday." → "is scheduled"), without
+    /// a dangling small word at the end. Empty when too little is left to be worth showing.
+    static func groundedPrefix(_ s: String, in before: String) -> String {
+        var words = s.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        while !words.isEmpty, !isGrounded(words.joined(separator: " "), in: before) { words.removeLast() }
+        let dangling: Set<String> = ["for", "to", "the", "a", "an", "of", "and", "or", "with", "on", "in", "at", "by", "from", "about", "as", "that", "your", "my", "our", "their"]
+        while let last = words.last, last.isEmpty || dangling.contains(last.lowercased()) { words.removeLast() }
+        let out = words.joined(separator: " ")
+        return out.split(separator: " ").count >= 2 ? out : ""
     }
 
     /// Rejects suggestions that bring in facts the user never wrote (numbers, names, links) or repeat what's there.
@@ -228,6 +240,7 @@ final class Autocomplete {
         - Prefer the most common, natural continuation over a creative one. Match their spelling, casing and style.
         - If the last word is unfinished, reply with only its missing letters and what follows, with no leading space: \
         "AI m" → "odel", never "model". Otherwise start with a space.
+        - Never repeat words that are already there. Start exactly where the text stops: "Let's ask" → " them", never "ask them".
         - Stop at a natural break: the end of a phrase or sentence.
         - confidence: how likely they'd type exactly this. 5 = almost certain, 4 = very likely, 3 or less = a guess. \
         When it would only be a guess, use 1 and an empty completion.
@@ -239,7 +252,34 @@ final class Autocomplete {
         "We trained a new AI m" → {"completion": "odel", "confidence": 4}
         "The quarterly numbers show that" → {"completion": "", "confidence": 1}
         "I wanted to follow up on" → {"completion": " our conversation", "confidence": 4}
+        "We still don't know how they did it. Let's ask" → {"completion": " them.", "confidence": 4}
         """
+    }
+
+    /// Models often restart from the last whole word(s) ("Let's ask" → "ask them"). Drops the longest run of the text's
+    /// final words that the reply opens with, so only the new part ("them") is left.
+    static func stripEcho(_ s: String, after before: String) -> String {
+        let body = s.drop(while: { $0 == " " })
+        let tailWords = before.split(whereSeparator: { $0 == " " || $0 == "\n" }).suffix(6).map(String.init)
+        guard !tailWords.isEmpty, !body.isEmpty else { return s }
+        func norm(_ w: Substring) -> String { w.trimmingCharacters(in: .punctuationCharacters).lowercased() }
+        let replyWords = body.split(separator: " ", omittingEmptySubsequences: false)
+        // Words that really do repeat in normal writing ("had had", "that that") only count as an echo with company.
+        let doubles: Set<String> = ["had", "that", "is", "very", "so", "really", "no", "bye", "ha"]
+        for n in stride(from: min(tailWords.count, replyWords.count), through: 1, by: -1) {
+            let tail = tailWords.suffix(n).map { norm(Substring($0)) }
+            let head = replyWords.prefix(n).map(norm)
+            guard tail == head, !tail.contains("") else { continue }
+            if n == 1, doubles.contains(tail[0]) { continue }
+            // Ends exactly at a word boundary: drop those words (and the space after them).
+            let dropped = replyWords.prefix(n).map(\.count).reduce(0, +) + (n - 1)
+            var rest = String(body.dropFirst(dropped))
+            if rest.isEmpty { return "" }
+            // The cursor sits right after a letter: the next word needs its space back.
+            if before.last?.isLetter == true, rest.first?.isLetter == true { rest = " " + rest }
+            return rest
+        }
+        return s
     }
 
     /// Tidies a reply into text that can be inserted after `before`.
@@ -252,6 +292,7 @@ final class Autocomplete {
         // The model sometimes repeats the end of the text before continuing.
         let tail = String(before.suffix(40))
         if let r = s.range(of: tail), r.lowerBound == s.startIndex { s = String(s[r.upperBound...]) }
+        s = stripEcho(s, after: before)
         if before.last?.isWhitespace == true { s = String(s.drop(while: { $0 == " " })) }
         // Half-typed word: models often send the whole word ("m" → "model") instead of the rest ("odel").
         if let last = before.last, last.isLetter {

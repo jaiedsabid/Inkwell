@@ -72,7 +72,8 @@ final class Coordinator: ObservableObject {
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             MainActor.assumeIsolated {
                 if let app, AX.isTrusted { AX.prepare(app: app) }
-                self?.card.hide()
+                // Opening the card's own menu can bring Inkwell forward; that isn't leaving the card.
+                if app?.processIdentifier != ProcessInfo.processInfo.processIdentifier { self?.card.hide() }
             }
         }
         checker.$issues.sink { [weak self] issues in
@@ -107,7 +108,7 @@ final class Coordinator: ObservableObject {
         if let g = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: handler) { monitors.append(g) }
         if let l = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved], handler: { handler($0); return $0 }) { monitors.append(l) }
         if let k = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown], handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.card.hide() }
+            MainActor.assumeIsolated { if self?.card.menuOpen == false { self?.card.hide() } }
         }) { monitors.append(k) }
     }
 

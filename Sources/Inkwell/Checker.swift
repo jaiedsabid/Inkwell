@@ -180,8 +180,21 @@ enum CheckPrompt {
         s += """
 
 
+        Look closely for the mistakes good editors catch most often:
+        - Commonly confused words: their/there/they're, its/it's, your/you're, then/than, affect/effect, lose/loose, \
+        who's/whose, fewer/less (fewer with things you can count), a/an.
+        - Subject-verb agreement ("the list of items are" → "is"), verb tense that shifts for no reason, wrong word forms.
+        - Missing or extra articles ("I went to store" → "the store").
+        - Commas: after an introductory phrase ("After lunch we left" → "After lunch, we left"), before "but", "so" or "and" \
+        joining two full sentences, around a name you're addressing ("Thanks John" → "Thanks, John"). Comma splices and \
+        run-on sentences: split them or join them properly.
+        - Apostrophes in contractions and possessives ("dont" → "don't", "the teams results" → "the team's results").
+        - For clarity: wordy phrases, needless passive voice, repeated words, and sentences over about 30 words that \
+        read better split in two.
+
         Rules:
         - Copy "original" character for character from the sentence.
+        - Only report a mistake you're sure about. A missed suggestion is better than a wrong one.
         - "explanation" is one short, plain sentence (at most 12 words) saying why, for example "Use 'its' for possession, not 'it's'."
         - Wanted tone: \(o.tone.label). \(o.tone.guidance)
         - How strict: \(o.strictness.guidance)
@@ -501,8 +514,18 @@ final class Checker: ObservableObject {
             }
             .filter { !isBeingTyped($0.range) }
         var local = spell
+        // Instant rules (doubled words, a/an, spacing, confused words, wordy phrases). The AI's and the spell
+        // checker's fixes come first where they overlap; wordy phrases wait if the AI rewrote that sentence.
+        let sentenceAI = ai.filter { $0.kind.isSentenceLevel }
+        let ruleTaken = wordLevelAI + spell
+        local += LocalRules.find(text, languageCode: language.spellCode, includeConciseness: AppSettings.shared.strictness != .relaxed)
+            .filter { r in
+                !isBeingTyped(r.range)
+                    && !ruleTaken.contains { NSIntersectionRange($0.range, r.range).length > 0 }
+                    && !(r.kind == .clarity && sentenceAI.contains { NSIntersectionRange($0.range, r.range).length > 0 })
+            }
         if AppSettings.shared.strictness != .relaxed {
-            let taken = ai.filter { !$0.kind.isSentenceLevel } + spell
+            let taken = ai.filter { !$0.kind.isSentenceLevel } + local
             local += TextTools.punctuation(sentences, skip: { isBeingTyped($0) })
                 .filter { p in
                     // The AI's or spell checker's fix for the same word comes first; this one shows once that's fixed.

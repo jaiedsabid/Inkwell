@@ -176,7 +176,7 @@ struct ChatView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "pencil.line").foregroundStyle(Theme.accent).font(.system(size: 14, weight: .semibold))
+            BrandGlyph(size: 16).foregroundStyle(Theme.accent)
             Text(model.isWriteMode ? "Write with Inkwell" : "Improve with Inkwell").font(.headline)
             Spacer()
             Menu {

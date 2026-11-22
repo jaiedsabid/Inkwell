@@ -210,7 +210,13 @@ enum Theme {
     static let red = NSColor(srgbRed: 0.94, green: 0.27, blue: 0.27, alpha: 1)
     static let blue = NSColor(srgbRed: 0.23, green: 0.51, blue: 0.96, alpha: 1)
     static let purple = NSColor(srgbRed: 0.62, green: 0.35, blue: 0.95, alpha: 1)
-    static let accent = Color(nsColor: NSColor(srgbRed: 0.36, green: 0.36, blue: 0.95, alpha: 1))
+    /// Brand "Nib" blue (#3446E0); lighter (#5463F0) on dark backgrounds so it keeps its contrast.
+    static let accentNS = NSColor(name: "InkwellNib") { a in
+        a.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            ? NSColor(srgbRed: 0x54 / 255, green: 0x63 / 255, blue: 0xF0 / 255, alpha: 1)
+            : NSColor(srgbRed: 0x34 / 255, green: 0x46 / 255, blue: 0xE0 / 255, alpha: 1)
+    }
+    static let accent = Color(nsColor: accentNS)
 }
 
 import SwiftUI
@@ -242,5 +248,20 @@ struct SecondaryButtonStyle: ButtonStyle {
             .padding(.horizontal, 12).padding(.vertical, 5)
             .background(Color.primary.opacity(configuration.isPressed ? 0.16 : 0.09), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .contentShape(Rectangle())
+    }
+}
+
+/// The Inkwell glyph (a nib writing a squiggle) as a tintable image, from the bundled menu bar template.
+struct BrandGlyph: View {
+    var size: CGFloat = 16
+    private static let image = Bundle.main.image(forResource: "MenuIcon")
+
+    var body: some View {
+        if let img = Self.image {
+            Image(nsImage: img).renderingMode(.template).resizable().interpolation(.high)
+                .aspectRatio(contentMode: .fit).frame(width: size, height: size)
+        } else {
+            Image(systemName: "pencil.line").font(.system(size: size * 0.85, weight: .semibold))
+        }
     }
 }

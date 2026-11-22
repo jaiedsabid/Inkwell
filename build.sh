@@ -29,7 +29,7 @@ cat > $APP/Contents/Info.plist <<PL
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PL
-[ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns $APP/Contents/Resources/
+cp Resources/AppIcon.icns Resources/MenuIcon.png Resources/MenuIcon@2x.png Resources/MenuIcon@3x.png $APP/Contents/Resources/
 # Sign with the fixed "Inkwell Signing" identity when there is one, so macOS keeps the Accessibility permission across
 # builds. Without one the build is ad hoc signed and macOS asks for Accessibility again after every build.
 IDENTITY="${SIGN_IDENTITY:-}"

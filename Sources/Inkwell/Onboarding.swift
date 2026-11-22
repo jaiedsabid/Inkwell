@@ -64,10 +64,14 @@ struct OnboardingView: View {
 
     private func hero(_ symbol: String, _ title: String, _ subtitle: String) -> some View {
         VStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 30, weight: .semibold)).foregroundStyle(.white)
-                .frame(width: 64, height: 64)
-                .background(Theme.accent.gradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            if symbol == "app" {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 84, height: 84).padding(-10)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 30, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 64, height: 64)
+                    .background(Theme.accent.gradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
             Text(title).font(.system(size: 24, weight: .bold))
             Text(subtitle).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
@@ -76,7 +80,7 @@ struct OnboardingView: View {
 
     private var welcome: some View {
         VStack(spacing: 26) {
-            hero("pencil.line", "Write better, everywhere", "Inkwell checks your writing in every app: browsers, Slack, Mail, Notes and more.")
+            hero("app", "Write better, everywhere", "Inkwell checks your writing in every app: browsers, Slack, Mail, Notes and more.")
             VStack(alignment: .leading, spacing: 14) {
                 Feature(symbol: "scribble", color: Theme.red, title: "Fix mistakes as you type", detail: "Red lines mark mistakes. Hover to see the fix, click to apply.")
                 Feature(symbol: "text.line.first.and.arrowtriangle.forward", color: Theme.blue, title: "Clearer sentences", detail: "Blue lines suggest a better way to say a whole sentence.")

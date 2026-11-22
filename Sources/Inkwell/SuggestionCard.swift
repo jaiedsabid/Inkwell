@@ -170,8 +170,31 @@ final class SuggestionCardController {
     var frame: CGRect { panel.frame }
     var currentID: String? { isVisible ? model.current?.id : nil }
 
+    /// True while the card's ••• menu is open. The menu draws outside the card, so moving onto its items must not
+    /// count as leaving the card.
+    private(set) var menuOpen = false
+    private var menuObservers: [Any] = []
+
     func configure(actions: CardActions) {
         panel.host(SuggestionCardView(model: model, actions: actions))
+        let nc = NotificationCenter.default
+        menuObservers = [
+            nc.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.panel.isVisible else { return }
+                    self.menuOpen = true
+                    self.cancelHide()
+                }
+            },
+            nc.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.menuOpen else { return }
+                    self.menuOpen = false
+                    // Closed without picking anything while the pointer is elsewhere: hide as usual.
+                    if !self.contains(NSEvent.mouseLocation) { self.scheduleHide(after: 0.6) }
+                }
+            },
+        ]
     }
 
     func show(_ issues: [Issue], start: Int = 0, anchor: CGRect) {
@@ -193,13 +216,14 @@ final class SuggestionCardController {
 
     func hide() {
         cancelHide()
+        menuOpen = false
         guard panel.isVisible else { return }
         panel.orderOut(nil)
         model.issues = []
     }
 
     func scheduleHide(after delay: TimeInterval = 0.35) {
-        guard hideWork == nil, panel.isVisible else { return }
+        guard hideWork == nil, panel.isVisible, !menuOpen else { return }
         let w = DispatchWorkItem { [weak self] in self?.hideWork = nil; self?.hide() }
         hideWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: w)
@@ -220,7 +244,7 @@ final class SuggestionCardController {
         }
     }
 
-    func contains(_ p: CGPoint) -> Bool { panel.isVisible && panel.frame.insetBy(dx: -10, dy: -10).contains(p) }
+    func contains(_ p: CGPoint) -> Bool { panel.isVisible && (menuOpen || panel.frame.insetBy(dx: -10, dy: -10).contains(p)) }
 }
 
 // MARK: - Toast
@@ -234,7 +258,7 @@ final class Toast {
     func show(_ message: String, near anchor: CGRect? = nil, action: (title: String, run: () -> Void)? = nil, duration: TimeInterval = 2.5) {
         work?.cancel()
         let view = HStack(spacing: 10) {
-            Image(systemName: "pencil.line").foregroundStyle(Theme.accent)
+            BrandGlyph(size: 15).foregroundStyle(Theme.accent)
             Text(message).font(.callout)
             if let action {
                 Button(action.title) { action.run(); self.hide() }
@@ -281,7 +305,8 @@ enum SuggestionText {
             out += a
         }
 
-        if issue.kind.isSentenceLevel {
+        // Whole-sentence rewrites; a short wordy phrase ("in order to" → "to") reads better in context below.
+        if issue.kind.isSentenceLevel, WordDiff.words(issue.original).count > 6 {
             let segs = WordDiff.segments(from: issue.original, to: issue.replacement)
             let kept = segs.filter { $0.kind == .same }.reduce(0) { $0 + WordDiff.words($1.text).count }
             // Mostly rewritten: a word-by-word diff would be noise, so just show the new sentence.

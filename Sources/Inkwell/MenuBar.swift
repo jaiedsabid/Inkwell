@@ -97,8 +97,7 @@ struct MenuContent: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(settings.isActive ? AnyShapeStyle(Theme.accent.gradient) : AnyShapeStyle(Color.gray.opacity(0.35)))
-                Image(systemName: settings.isActive ? "pencil.line" : "pencil.slash")
-                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                BrandGlyph(size: 20).foregroundStyle(.white.opacity(settings.isActive ? 1 : 0.8))
             }
             .frame(width: 32, height: 32)
 

@@ -14,7 +14,7 @@ final class StatusMenu: NSObject {
     private var bag = Set<AnyCancellable>()
 
     func install() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.target = self
         item.button?.action = #selector(toggle)
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -34,8 +34,12 @@ final class StatusMenu: NSObject {
 
     private func updateIcon() {
         let active = AppSettings.shared.isActive
-        let img = NSImage(systemSymbolName: active ? "pencil.line" : "pencil.slash", accessibilityDescription: "Inkwell")
+        // The brand glyph (a nib writing a squiggle); dimmed when off. SF Symbol fallback for `swift run`.
+        let brand = Bundle.main.image(forResource: "MenuIcon")
+        brand?.size = NSSize(width: 25, height: 18)   // cropped tight so it fills the menu bar's height
+        let img = brand ?? NSImage(systemSymbolName: active ? "pencil.line" : "pencil.slash", accessibilityDescription: "Inkwell")
         img?.isTemplate = true
+        img?.accessibilityDescription = "Inkwell"
         item?.button?.image = img
         item?.button?.appearsDisabled = !active
     }

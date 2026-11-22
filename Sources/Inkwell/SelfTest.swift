@@ -104,6 +104,34 @@ enum SelfTest {
         // Next-word suggestions
         check(Autocomplete.clean("\"quick brown fox\"\nmore", after: "The ", length: .phrase) == "quick brown fox", "suggestion: strips quotes and extra lines")
         check(Autocomplete.clean(" for your help", after: "Thanks ", length: .phrase) == "for your help", "suggestion: no double space")
+        check(Autocomplete.groundedPrefix(" is scheduled for Tuesday.", in: "the meeting") == " is scheduled", "suggestion: keeps the grounded part")
+        check(Autocomplete.groundedPrefix(" with Sarah", in: "I met") == "", "suggestion: too little left")
+        func rule(_ t: String) -> [String] { LocalRules.find(t, languageCode: "en_US", includeConciseness: true).map { "\($0.original)→\($0.replacement)" } }
+        check(rule("I saw the the cat.") == ["the the→the"], "rules: doubled word")
+        check(rule("She had had enough.").isEmpty, "rules: real double word kept")
+        check(rule("It was a apple and an book.") == ["a apple→an apple", "an book→a book"], "rules: a/an")
+        check(rule("We waited an hour for a user at a university.").isEmpty, "rules: a/an by sound")
+        check(rule("It was an unimportant detail.").isEmpty, "rules: an unimportant")
+        check(rule("I could of gone.") == ["could of→could have"], "rules: could of")
+        check(rule("It is better then that.") == ["better then→better than"], "rules: then/than")
+        check(rule("We'll talk later then.").isEmpty, "rules: later then kept")
+        check(rule("Yesterday i went home and i'm tired.") == ["i→I", "i'm→I'm"], "rules: lowercase i")
+        check(rule("See i.e. this.").isEmpty, "rules: i.e. kept")
+        check(rule("Thanks , see you.") == ["Thanks ,→Thanks,"], "rules: space before comma")
+        check(rule("Thanks,see you.") == ["Thanks,see→Thanks, see"], "rules: space after comma")
+        check(rule("Costs 1,000 dollars.").isEmpty, "rules: numbers untouched")
+        check(rule("However we left early.") == ["However→However,"], "rules: intro comma")
+        check(rule("As a result of the storm we left.").isEmpty, "rules: intro phrase with of kept")
+        check(rule("In order to win, train.") == ["In order to→To"], "rules: wordy, keeps case")
+        check(rule("Its a good day.") == ["Its a→It's a"], "rules: its/it's")
+        check(rule("Their is a cat.") == ["Their is→There is"], "rules: their is")
+        check(rule("Visit https://a.com/the the page").isEmpty, "rules: links skipped")
+        check(rule("Ok.  Next one.") == [".  →. "], "rules: double space")
+        check(Autocomplete.clean(" ask them", after: "How they did it. Let's ask", length: .phrase) == " them", "suggestion: drops a repeated last word")
+        check(Autocomplete.clean("ask them.", after: "How they did it. Let's ask ", length: .phrase) == "them.", "suggestion: drops a repeated word after a space")
+        check(Autocomplete.clean("Let's ask them", after: "How they did it. Let's ask", length: .phrase) == " them", "suggestion: drops repeated words")
+        check(Autocomplete.clean(" had been", after: "She had", length: .phrase) == " had been", "suggestion: keeps a real double word")
+        check(Autocomplete.clean(" ask", after: "Let's ask", length: .phrase) == "", "suggestion: pure echo is dropped")
         check(Autocomplete.clean("See you soon", after: "Thanks.", length: .phrase) == " See you soon", "suggestion: space after punctuation")
         check(Autocomplete.clean("s for the help", after: "Thank", length: .phrase) == "s for the help", "suggestion: finishes a word")
         check(Autocomplete.clean("file organization", after: "help with the", length: .phrase) == " file organization", "suggestion: adds missing space")
@@ -180,7 +208,7 @@ enum SelfTest {
 
     /// `Inkwell --aitest`: runs one real check with the configured engine and prints what comes back.
     static func aiTest() async -> Bool {
-        let sentences = [1: "I has a apple and it are red.", 2: "The meeting that we had was a meeting where things were discussed by us.", 3: "Thanks for your help."]
+        let sentences = [1: "I has a apple and it are red. after lunch we left but the store was closed", 2: "The meeting that we had was a meeting where things were discussed by us.", 3: "Thanks for your help."]
         print("Engine: \(AppSettings.shared.engine.rawValue)")
         do {
             let client = try AI.client()
@@ -216,7 +244,7 @@ enum SelfTest {
             if let e = store.errors[id] { print("Download failed: \(e)"); return false }
         }
         let client = LocalClient(model: m, path: store.path(m).path)
-        let sentences = [1: "I has a apple and it are red.", 2: "The meeting that we had was a meeting where things were discussed by us.", 3: "Thanks for your help."]
+        let sentences = [1: "I has a apple and it are red. after lunch we left but the store was closed", 2: "The meeting that we had was a meeting where things were discussed by us.", 3: "Thanks for your help."]
         do {
             var t = Date()
             let opts = CheckPrompt.Options(languageName: "English (US)", tone: .professional, strictness: .standard, toneCheck: false)
@@ -234,7 +262,7 @@ enum SelfTest {
                                                  jsonSchema: nil, purpose: .chat)
             print(String(format: "Rewrite %.1fs: %@", Date().timeIntervalSince(t), ChatPrompt.clean(chat)))
             let samples = ["Thanks so much for your help with the", "I'm writing to let you know that the meeting", "Could you please send me",
-                           "Let me know if you have any", "Hope you're doing", "The results of the experiment suggest that", "Sorry for the late", "We are building a new AI m", "Thanks for the upd"]
+                           "Let me know if you have any", "Hope you're doing", "The results of the experiment suggest that", "Sorry for the late", "We are building a new AI m", "Thanks for the upd", "How they did it. Let's ask", "How they did it. Let's ask ", "We need to make sure that"]
             for before in samples {
                 t = Date()
                 let ctx = Autocomplete.Context(app: "Mail", window: "Re: Project update", field: "Message body")
