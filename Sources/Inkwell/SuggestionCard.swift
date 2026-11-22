@@ -49,16 +49,25 @@ final class FloatingPanel: NSPanel {
 final class CardModel: ObservableObject {
     @Published var issues: [Issue] = []
     @Published var index = 0
+    /// Word-level fixes in the whole field, for "Fix all".
+    @Published var fixAllCount = 0
+    @Published var appName: String?
+    @Published var host: String?
     var current: Issue? { issues.indices.contains(index) ? issues[index] : nil }
 }
 
 struct CardActions {
     var accept: (Issue) -> Void
     var dismiss: (Issue) -> Void
+    var fixAll: () -> Void = {}
+    var addWord: (String) -> Void = { _ in }
+    var disableApp: () -> Void = {}
+    var disableSite: () -> Void = {}
 }
 
 struct SuggestionCardView: View {
     @ObservedObject var model: CardModel
+    @ObservedObject var settings = AppSettings.shared
     let actions: CardActions
 
     var body: some View {
@@ -91,6 +100,12 @@ struct SuggestionCardView: View {
                     .font(.body)
                 }
 
+                if settings.showExplanations, !issue.explanation.isEmpty {
+                    Text(issue.explanation)
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 HStack(spacing: 8) {
                     Button { actions.accept(issue) } label: {
                         Label("Accept", systemImage: "checkmark")
@@ -100,6 +115,21 @@ struct SuggestionCardView: View {
                     Button("Dismiss") { actions.dismiss(issue) }
                         .buttonStyle(SecondaryButtonStyle())
                     Spacer()
+                    if model.fixAllCount > 1, !issue.kind.isSentenceLevel {
+                        Button("Fix all \(model.fixAllCount)") { actions.fixAll() }
+                            .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.accent)
+                    }
+                    Menu {
+                        if issue.kind == .spelling {
+                            Button("Add “\(issue.original)” to dictionary") { actions.addWord(issue.original) }
+                        }
+                        if let app = model.appName { Button("Turn off in \(app)") { actions.disableApp() } }
+                        if let host = model.host { Button("Turn off on \(host)") { actions.disableSite() } }
+                    } label: {
+                        Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+                            .frame(width: 22, height: 22).contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 }
             }
         }

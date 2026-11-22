@@ -46,6 +46,17 @@ struct MenuContent: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             notices
+            if settings.enabled, let app = coordinator.frontApp, app.bundleIdentifier != nil {
+                VStack(spacing: 6) {
+                    ToggleRow(title: "Check in \(app.localizedName ?? "this app")", icon: app.icon,
+                              isOn: !settings.disabledApps.contains(app.bundleIdentifier!)) { coordinator.setChecking($0, app: true) }
+                    if let host = coordinator.host {
+                        let site = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+                        ToggleRow(title: "Check on \(site)", symbol: "globe",
+                                  isOn: !settings.isDisabled(app: nil, host: host)) { coordinator.setChecking($0, app: false) }
+                    }
+                }
+            }
             Divider()
             VStack(alignment: .leading, spacing: 8) {
                 Text("Tone").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -124,6 +135,7 @@ struct MenuContent: View {
         case .needsPermission: return "Needs permission"
         case .off: return "Off"
         case .idle: return "On · type in any app"
+        case .disabled(let where_): return "Off in \(where_)"
         case .watching(let app):
             switch checker.status {
             case .checking: return "Checking in \(app)…"
@@ -180,5 +192,23 @@ struct Notice: View {
         }
         .padding(10)
         .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+}
+
+struct ToggleRow: View {
+    var title: String
+    var icon: NSImage? = nil
+    var symbol: String? = nil
+    var isOn: Bool
+    var set: (Bool) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let icon { Image(nsImage: icon).resizable().frame(width: 18, height: 18) }
+            else if let symbol { Image(systemName: symbol).frame(width: 18).foregroundStyle(.secondary) }
+            Text(title).lineLimit(1)
+            Spacer()
+            Toggle("", isOn: Binding(get: { isOn }, set: set)).toggleStyle(.switch).labelsHidden().controlSize(.mini)
+        }
     }
 }

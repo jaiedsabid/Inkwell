@@ -8,8 +8,11 @@ final class ChatModel: ObservableObject {
     struct Turn: Identifiable, Equatable {
         let id = UUID()
         var prompt: String
+        /// What's sent to the AI when it differs from what's shown (quick actions).
+        var instruction: String? = nil
         var result: String?
         var error: String?
+        var sent: String { instruction ?? prompt }
     }
 
     @Published var source = ""
@@ -42,6 +45,12 @@ final class ChatModel: ObservableObject {
         run()
     }
 
+    func send(_ action: QuickAction) {
+        guard !loading else { return }
+        turns.append(Turn(prompt: action.title, instruction: action.instruction))
+        run()
+    }
+
     func retry() {
         guard var last = turns.last else { return }
         last.result = nil; last.error = nil
@@ -55,7 +64,8 @@ final class ChatModel: ObservableObject {
             turns[turns.count - 1].error = error.localizedDescription
             return
         }
-        let system = ChatPrompt.system(tone: AppSettings.shared.tone, language: AppSettings.shared.language.name, writeMode: isWriteMode)
+        let s = AppSettings.shared
+        let system = ChatPrompt.system(tone: s.tone(for: app?.bundleIdentifier), language: s.language.name, writeMode: isWriteMode)
         let messages = ChatPrompt.messages(source: source, turns: turns)
         loading = true
         task = Task { [weak self] in
@@ -93,11 +103,11 @@ enum ChatPrompt {
         for (i, t) in turns.enumerated() {
             if i == 0 {
                 let text = source.isEmpty
-                    ? "Instruction: \(t.prompt)"
-                    : "Text:\n<<<\n\(source)\n>>>\n\nInstruction: \(t.prompt)"
+                    ? "Instruction: \(t.sent)"
+                    : "Text:\n<<<\n\(source)\n>>>\n\nInstruction: \(t.sent)"
                 out.append(.init(role: .user, text: text))
             } else {
-                out.append(.init(role: .user, text: t.prompt))
+                out.append(.init(role: .user, text: t.sent))
             }
             if let r = t.result, i < turns.count - 1 { out.append(.init(role: .assistant, text: r)) }
         }
@@ -141,6 +151,7 @@ struct ChatView: View {
                 }
             }
             Divider().opacity(0.5)
+            if !(model.isWriteMode && model.turns.isEmpty) { quickActions }
             inputBar
         }
         .frame(width: 480)
@@ -241,6 +252,25 @@ struct ChatView: View {
                 }
                 .padding(.vertical, 4)
             }
+        }
+    }
+
+    private var quickActions: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(QuickAction.all) { a in
+                    Button { model.send(a) } label: {
+                        Label(a.title, systemImage: a.symbol)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .padding(.horizontal, 9).padding(.vertical, 5)
+                            .background(Color.primary.opacity(0.07), in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.loading)
+                }
+            }
+            .padding(.horizontal, 14).padding(.top, 10)
         }
     }
 
@@ -350,4 +380,21 @@ final class ChatController {
             model.reset()
         }
     }
+}
+
+struct QuickAction: Identifiable {
+    var title: String
+    var symbol: String
+    var instruction: String
+    var id: String { title }
+
+    static let all: [QuickAction] = [
+        .init(title: "Fix grammar", symbol: "checkmark.circle", instruction: "Fix spelling, grammar and punctuation only. Change nothing else."),
+        .init(title: "Shorter", symbol: "arrow.down.right.and.arrow.up.left", instruction: "Make it shorter. Keep the key points."),
+        .init(title: "Longer", symbol: "arrow.up.left.and.arrow.down.right", instruction: "Make it a little longer and more complete, without adding facts."),
+        .init(title: "Simpler", symbol: "text.badge.minus", instruction: "Use simpler words and shorter sentences."),
+        .init(title: "Friendlier", symbol: "face.smiling", instruction: "Make it warmer and friendlier."),
+        .init(title: "Professional", symbol: "briefcase", instruction: "Make it more professional and polished."),
+        .init(title: "Confident", symbol: "bolt", instruction: "Make it sound more confident and direct. Remove hedging."),
+    ]
 }

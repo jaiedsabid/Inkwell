@@ -107,6 +107,7 @@ enum CheckPrompt {
         var tone: Tone
         var strictness: Strictness
         var toneCheck: Bool
+        var dictionary: [String] = []
     }
 
     static func system(_ o: Options) -> String {
@@ -136,7 +137,7 @@ enum CheckPrompt {
         - "explanation" is one short, plain sentence (at most 12 words) saying why, for example "Use 'its' for possession, not 'it's'."
         - Wanted tone: \(o.tone.label). \(o.tone.guidance)
         - How strict: \(o.strictness.guidance)
-        - Don't flag names, brands, product terms, URLs, code, emoji, or slang that suits the tone.
+        - Don't flag names, brands, product terms, URLs, code, emoji, or slang that suits the tone.\(o.dictionary.isEmpty ? "" : "\n- Never flag these words from the user's dictionary: " + o.dictionary.prefix(200).joined(separator: ", ") + ".")
         - Write replacements in the same language as the sentence.
         - Leave out sentences that have nothing to fix. An empty list is a fine answer.
         """
@@ -191,6 +192,10 @@ final class Checker: ObservableObject {
 
     private(set) var text = ""
     private var cursor: Int?
+    /// The app being typed in, for its tone setting.
+    var appBundleID: String?
+    /// Language detected from the text itself (when auto-detect is on).
+    @Published private(set) var detected: WritingLanguage?
     private var cache: [String: [LocalIssue]] = [:]
     private var inFlight = Set<String>()
     private var requesting = false
@@ -202,6 +207,7 @@ final class Checker: ObservableObject {
     func textChanged(_ newText: String, cursor: Int?) {
         text = newText
         self.cursor = cursor
+        detectLanguage()
         recompute()
         debounce?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.runAI() }
@@ -213,6 +219,7 @@ final class Checker: ObservableObject {
         debounce?.cancel()
         text = ""
         cursor = nil
+        detected = nil
         if !issues.isEmpty { issues = [] }
     }
 
@@ -228,9 +235,28 @@ final class Checker: ObservableObject {
         runAI()
     }
 
+    /// The language being checked: detected from the text, or the user's main language.
+    var language: WritingLanguage {
+        let s = AppSettings.shared
+        return (s.autoDetectLanguage ? detected : nil) ?? s.language
+    }
+
     var options: CheckPrompt.Options {
         let s = AppSettings.shared
-        return .init(languageName: s.language.name, tone: s.tone, strictness: .standard, toneCheck: false)
+        return .init(languageName: language.name, tone: s.tone(for: appBundleID), strictness: s.strictness,
+                     toneCheck: false, dictionary: s.dictionary)
+    }
+
+    private func detectLanguage() {
+        guard AppSettings.shared.autoDetectLanguage, text.filter(\.isLetter).count >= 25 else { return }
+        let rec = NLLanguageRecognizer()
+        rec.processString(String(text.suffix(2000)))
+        guard let lang = rec.dominantLanguage?.rawValue,
+              let conf = rec.languageHypotheses(withMaximum: 1).first?.value, conf > 0.6 else { return }
+        let base = String(lang.prefix(2))
+        let main = AppSettings.shared.language
+        let found: WritingLanguage? = main.code.hasPrefix(base) ? main : WritingLanguage.all.first { $0.code.hasPrefix(base) }
+        if found != detected { detected = found }
     }
 
     private func key(_ sentence: String) -> String {
@@ -248,8 +274,10 @@ final class Checker: ObservableObject {
                                 kind: l.kind, original: l.original, replacement: l.replacement, explanation: l.explanation))
             }
         }
+        let dict = AppSettings.shared.dictionarySet
+        ai.removeAll { !$0.kind.isSentenceLevel && dict.contains($0.original.lowercased()) }
         let wordLevelAI = ai.filter { !$0.kind.isSentenceLevel }
-        let spell = TextTools.spelling(text, language: AppSettings.shared.language.spellCode, ignored: [])
+        let spell = TextTools.spelling(text, language: language.spellCode, ignored: dict)
             .filter { sp in
                 // The AI's own fix wins where both found something.
                 !wordLevelAI.contains { NSIntersectionRange($0.range, sp.range).length > 0 }

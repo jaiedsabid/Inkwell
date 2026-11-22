@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import ServiceManagement
 
 enum EngineKind: String, CaseIterable, Codable, Identifiable {
@@ -45,6 +45,17 @@ final class AppSettings: ObservableObject {
     // Writing
     @Published var languageCode: String { didSet { save("languageCode", languageCode) } }
     @Published var tone: Tone { didSet { save("tone", tone) } }
+    @Published var autoDetectLanguage: Bool { didSet { save("autoDetectLanguage", autoDetectLanguage) } }
+    @Published var strictness: Strictness { didSet { save("strictness", strictness) } }
+    @Published var showExplanations: Bool { didSet { save("showExplanations", showExplanations) } }
+
+    // Apps & privacy
+    /// Tone per app, by bundle identifier. Apps not listed use `tone`.
+    @Published var appTones: [String: Tone] { didSet { save("appTones", appTones) } }
+    @Published var disabledApps: Set<String> { didSet { save("disabledApps", disabledApps) } }
+    @Published var disabledSites: Set<String> { didSet { save("disabledSites", disabledSites) } }
+    /// Words never flagged (names, slang, product terms).
+    @Published var dictionary: [String] { didSet { save("dictionary", dictionary) } }
 
     // AI
     @Published var engine: EngineKind { didSet { save("engine", engine) } }
@@ -70,6 +81,13 @@ final class AppSettings: ObservableObject {
         onboarded = load("onboarded", false)
         languageCode = load("languageCode", Self.defaultLanguage())
         tone = load("tone", .natural)
+        autoDetectLanguage = load("autoDetectLanguage", true)
+        strictness = load("strictness", .standard)
+        showExplanations = load("showExplanations", true)
+        appTones = load("appTones", [:])
+        disabledApps = load("disabledApps", Self.defaultDisabledApps)
+        disabledSites = load("disabledSites", [])
+        dictionary = load("dictionary", [])
         engine = load("engine", .cloud)
         provider = load("provider", .anthropic)
         checkModel = load("checkModel", Provider.anthropic.defaultCheckModel)
@@ -79,6 +97,12 @@ final class AppSettings: ObservableObject {
     private func save<T: Encodable>(_ key: String, _ value: T) {
         d.set(try? JSONEncoder().encode(value), forKey: key)
     }
+
+    /// Password managers and terminals are off by default.
+    static let defaultDisabledApps: Set<String> = [
+        "com.1password.1password", "com.agilebits.onepassword7", "com.bitwarden.desktop", "com.apple.keychainaccess",
+        "com.apple.Passwords", "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "com.mitchellh.ghostty",
+    ]
 
     private static func defaultLanguage() -> String {
         let pref = Locale.preferredLanguages.first ?? "en-US"
@@ -93,6 +117,25 @@ final class AppSettings: ObservableObject {
     /// True when Inkwell should check text right now.
     var isActive: Bool { enabled && !isPaused }
     var language: WritingLanguage { WritingLanguage.find(languageCode) }
+
+    func tone(for bundleID: String?) -> Tone { bundleID.flatMap { appTones[$0] } ?? tone }
+
+    func isDisabled(app bundleID: String?, host: String?) -> Bool {
+        if let b = bundleID, disabledApps.contains(b) { return true }
+        if let h = host?.lowercased() {
+            return disabledSites.contains { h == $0 || h.hasSuffix("." + $0) }
+        }
+        return false
+    }
+
+    func addToDictionary(_ word: String) {
+        let w = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !w.isEmpty, !dictionary.contains(where: { $0.caseInsensitiveCompare(w) == .orderedSame }) else { return }
+        dictionary.append(w)
+        NSSpellChecker.shared.learnWord(w)
+    }
+
+    var dictionarySet: Set<String> { Set(dictionary.map { $0.lowercased() }) }
 
     func pause(for seconds: TimeInterval) { pausedUntil = Date().addingTimeInterval(seconds) }
     func pauseUntilTomorrow() {

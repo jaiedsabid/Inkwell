@@ -2,12 +2,14 @@ import Combine
 import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, writing, ai
+    case general, writing, apps, privacy, ai
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: "General"
         case .writing: "Writing"
+        case .apps: "Apps & Websites"
+        case .privacy: "Dictionary & Privacy"
         case .ai: "AI Engine"
         }
     }
@@ -15,6 +17,8 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gearshape"
         case .writing: "textformat"
+        case .apps: "square.grid.2x2"
+        case .privacy: "book.closed"
         case .ai: "cpu"
         }
     }
@@ -22,6 +26,8 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: .gray
         case .writing: .blue
+        case .apps: .orange
+        case .privacy: .green
         case .ai: .purple
         }
     }
@@ -56,6 +62,8 @@ struct SettingsView: View {
                 switch nav.pane {
                 case .general: GeneralPane()
                 case .writing: WritingPane()
+                case .apps: AppsPane()
+                case .privacy: PrivacyPane()
                 case .ai: AIPane()
                 }
             }
@@ -127,12 +135,29 @@ struct WritingPane: View {
         Form {
             Section("Language") {
                 LanguagePicker(code: $settings.languageCode)
+                Toggle(isOn: $settings.autoDetectLanguage) {
+                    Text("Detect language automatically")
+                    Text("If you write in another language, Inkwell checks it in that language.")
+                }
             }
             Section {
                 ToneGrid(selection: $settings.tone, columns: 4).padding(.vertical, 4)
                 Text(settings.tone.guidance).font(.callout).foregroundStyle(.secondary)
             } header: {
                 Text("Default tone")
+            } footer: {
+                Text("You can pick a different tone for each app in Apps & Websites.")
+            }
+            Section("Suggestions") {
+                Picker("How strict", selection: $settings.strictness) {
+                    ForEach(Strictness.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text(settings.strictness.detail).font(.callout).foregroundStyle(.secondary)
+                Toggle(isOn: $settings.showExplanations) {
+                    Text("Explain each fix")
+                    Text("A short line saying why, so you learn as you go.")
+                }
             }
             Section("What the colors mean") {
                 ColorRow(color: Theme.red, style: "Wavy", title: "Mistake", detail: "Spelling or grammar. Hover to see the fix.")
@@ -252,6 +277,167 @@ struct AIPane: View {
                 testState = .ok
             } catch {
                 testState = .failed(error.localizedDescription)
+            }
+        }
+    }
+}
+
+// MARK: - Apps & Websites
+
+struct AppsPane: View {
+    @ObservedObject var settings = AppSettings.shared
+    @Loc private var newSite = ""
+
+    private struct AppEntry: Identifiable { let id: String; let name: String; let icon: NSImage? }
+
+    /// Running apps plus any app that has a setting, sorted by name.
+    private var apps: [AppEntry] {
+        var seen = Set<String>()
+        var out: [AppEntry] = []
+        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+            guard let id = app.bundleIdentifier, id != Bundle.main.bundleIdentifier, seen.insert(id).inserted else { continue }
+            out.append(AppEntry(id: id, name: app.localizedName ?? id, icon: app.icon))
+        }
+        for id in Set(settings.appTones.keys).union(settings.disabledApps) where !seen.contains(id) {
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { continue }
+            seen.insert(id)
+            out.append(AppEntry(id: id, name: FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: ""),
+                                icon: NSWorkspace.shared.icon(forFile: url.path)))
+        }
+        return out.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(apps) { app in
+                    HStack(spacing: 10) {
+                        if let icon = app.icon { Image(nsImage: icon).resizable().frame(width: 22, height: 22) }
+                        Text(app.name)
+                        Spacer()
+                        Picker("", selection: Binding(
+                            get: { settings.appTones[app.id] },
+                            set: { settings.appTones[app.id] = $0 })) {
+                            Text("Default tone").tag(Tone?.none)
+                            Divider()
+                            ForEach(Tone.allCases) { Text($0.label).tag(Tone?.some($0)) }
+                        }
+                        .labelsHidden().fixedSize()
+                        .disabled(settings.disabledApps.contains(app.id))
+                        Toggle("", isOn: Binding(
+                            get: { !settings.disabledApps.contains(app.id) },
+                            set: { if $0 { settings.disabledApps.remove(app.id) } else { settings.disabledApps.insert(app.id) } }))
+                            .toggleStyle(.switch).labelsHidden().controlSize(.small)
+                    }
+                }
+            } header: {
+                Text("Apps")
+            } footer: {
+                Text("Switch an app off to stop checking there. Password managers and terminals start off. Open apps are listed; others appear once you change them.")
+            }
+
+            Section {
+                ForEach(settings.disabledSites.sorted(), id: \.self) { site in
+                    HStack {
+                        Image(systemName: "globe").foregroundStyle(.secondary)
+                        Text(site)
+                        Spacer()
+                        Button { settings.disabledSites.remove(site) } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.secondary) }
+                            .buttonStyle(.plain).help("Check this site again")
+                    }
+                }
+                HStack {
+                    TextField("Add a website, like docs.google.com", text: $newSite).textFieldStyle(.roundedBorder).labelsHidden()
+                        .onSubmit(addSite)
+                    Button("Add", action: addSite).disabled(newSite.isEmpty)
+                }
+            } header: {
+                Text("Websites where Inkwell stays off")
+            } footer: {
+                Text("Works in Safari, Chrome, Edge, Brave, Arc and other browsers. Subdomains are included.")
+            }
+        }
+    }
+
+    private func addSite() {
+        var s = newSite.trimmingCharacters(in: .whitespaces).lowercased()
+        if let host = URL(string: s.contains("://") ? s : "https://" + s)?.host { s = host }
+        if s.hasPrefix("www.") { s = String(s.dropFirst(4)) }
+        guard !s.isEmpty else { return }
+        settings.disabledSites.insert(s)
+        newSite = ""
+    }
+}
+
+// MARK: - Dictionary & Privacy
+
+struct PrivacyPane: View {
+    @ObservedObject var settings = AppSettings.shared
+    @Loc private var newWord = ""
+    @Loc private var filter = ""
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    TextField("Add a word, name or term", text: $newWord).textFieldStyle(.roundedBorder).labelsHidden()
+                        .onSubmit(add)
+                    Button("Add", action: add).disabled(newWord.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                if settings.dictionary.count > 8 {
+                    TextField("Search", text: $filter).textFieldStyle(.roundedBorder).labelsHidden()
+                }
+                if settings.dictionary.isEmpty {
+                    Text("No words yet. Add names, product terms or slang you use, or choose “Add to dictionary” on a suggestion.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                ForEach(settings.dictionary.filter { filter.isEmpty || $0.localizedCaseInsensitiveContains(filter) }.sorted(), id: \.self) { word in
+                    HStack {
+                        Text(word)
+                        Spacer()
+                        Button { remove(word) } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.secondary) }
+                            .buttonStyle(.plain)
+                    }
+                }
+            } header: {
+                Text("Personal dictionary (\(settings.dictionary.count))")
+            } footer: {
+                Text("Words here are never marked as mistakes.")
+            }
+
+            Section("Privacy") {
+                PrivacyRow(symbol: "lock.fill", title: "Password fields are never read", detail: "Secure fields are skipped in every app.")
+                PrivacyRow(symbol: "hand.raised.fill", title: "Off in password managers and terminals", detail: "Change this in Apps & Websites.")
+                PrivacyRow(symbol: "internaldrive", title: "Spelling is checked on your Mac",
+                           detail: settings.engine == .onDevice
+                               ? "Grammar and rewrites also run on your Mac. Nothing is sent anywhere."
+                               : "For grammar and rewrites, only the sentences being checked are sent to \(settings.provider.label), using your key. Inkwell has no servers and keeps no copy.")
+                PrivacyRow(symbol: "key.fill", title: "Your API key stays in the Keychain", detail: "It's only sent to your provider.")
+            }
+        }
+    }
+
+    private func add() {
+        settings.addToDictionary(newWord)
+        newWord = ""
+    }
+
+    private func remove(_ word: String) {
+        settings.dictionary.removeAll { $0 == word }
+        NSSpellChecker.shared.unlearnWord(word)
+    }
+}
+
+struct PrivacyRow: View {
+    var symbol: String
+    var title: String
+    var detail: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol).foregroundStyle(.green).frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
     }

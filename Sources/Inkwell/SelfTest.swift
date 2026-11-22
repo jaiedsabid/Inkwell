@@ -60,9 +60,23 @@ enum SelfTest {
         check(ChatPrompt.clean("\"Hello there.\"") == "Hello there.", "strips wrapping quotes")
         check(ChatPrompt.clean("She said \"hi\" to me.") == "She said \"hi\" to me.", "keeps inner quotes")
 
+        // Phase 2: dictionary, strictness, quick actions, site matching
+        let sys2 = CheckPrompt.system(.init(languageName: "English (US)", tone: .casual, strictness: .relaxed, toneCheck: false, dictionary: ["Inkwell", "Jaied"]))
+        check(sys2.contains("Inkwell, Jaied") && sys2.contains("Only flag definite"), "prompt carries dictionary and strictness")
+        let qa = ChatPrompt.messages(source: "Hi.", turns: [ChatModel.Turn(prompt: "Shorter", instruction: "Make it shorter.")])
+        check(qa.first?.text.hasSuffix("Instruction: Make it shorter.") == true, "quick action sends its instruction")
+        let s0 = AppSettings.shared
+        let savedSites = s0.disabledSites
+        s0.disabledSites = ["google.com"]
+        check(s0.isDisabled(app: nil, host: "docs.google.com") && !s0.isDisabled(app: nil, host: "notgoogle.com"), "site rule covers subdomains only")
+        s0.disabledSites = savedSites
+        check(s0.isDisabled(app: "com.apple.Terminal", host: nil) || !s0.disabledApps.contains("com.apple.Terminal"), "disabled app rule")
+
         // Spelling
         let sp = TextTools.spelling("This is teh best exmaple of it.", language: "en", ignored: [])
         check(sp.contains { $0.original == "teh" }, "spell checker flags 'teh'")
+        let sp2 = TextTools.spelling("This is teh best exmaple of it.", language: "en", ignored: ["teh"])
+        check(!sp2.contains { $0.original == "teh" }, "dictionary words are not flagged")
         check(TextTools.isSkippable("API") && TextTools.isSkippable("user@x.com") && !TextTools.isSkippable("hello"), "skips acronyms and addresses")
 
         print(failures == 0 ? "All passed" : "\(failures) failed")

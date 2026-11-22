@@ -8,7 +8,7 @@ import Combine
 final class Coordinator: ObservableObject {
     static let shared = Coordinator()
 
-    enum FieldState: Equatable { case off, needsPermission, idle, watching(app: String) }
+    enum FieldState: Equatable { case off, needsPermission, idle, watching(app: String), disabled(app: String) }
 
     let checker = Checker()
     let overlay = OverlayController()
@@ -18,6 +18,8 @@ final class Coordinator: ObservableObject {
     @Published private(set) var frontApp: NSRunningApplication?
 
     private(set) var element: AXUIElement?
+    /// Website the field is on (browsers only).
+    @Published private(set) var host: String?
     private var lastValue: String?
     private var timer: Timer?
     private var tickCount = 0
@@ -28,8 +30,16 @@ final class Coordinator: ObservableObject {
     private let settings = AppSettings.shared
 
     func start() {
-        card.configure(actions: CardActions(accept: { [weak self] in self?.accept($0) },
-                                            dismiss: { [weak self] in self?.dismiss($0) }))
+        card.configure(actions: CardActions(
+            accept: { [weak self] in self?.accept($0) },
+            dismiss: { [weak self] in self?.dismiss($0) },
+            fixAll: { [weak self] in self?.fixAll() },
+            addWord: { [weak self] word in
+                AppSettings.shared.addToDictionary(word)
+                self?.card.hide()
+            },
+            disableApp: { [weak self] in self?.setChecking(false, app: true) },
+            disableSite: { [weak self] in self?.setChecking(false, app: false) }))
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -46,6 +56,11 @@ final class Coordinator: ObservableObject {
         // Re-check everything when the tone or language changes.
         settings.$tone.dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.checker.invalidate() } }.store(in: &bag)
         settings.$languageCode.dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.checker.invalidate() } }.store(in: &bag)
+        Publishers.Merge4(settings.$strictness.dropFirst().map { _ in () }, settings.$appTones.dropFirst().map { _ in () },
+                          settings.$dictionary.dropFirst().map { _ in () }, settings.$autoDetectLanguage.dropFirst().map { _ in () })
+            .sink { [weak self] in DispatchQueue.main.async { self?.checker.invalidate() } }.store(in: &bag)
+        Publishers.Merge(settings.$disabledApps.dropFirst().map { _ in () }, settings.$disabledSites.dropFirst().map { _ in () })
+            .sink { [weak self] in DispatchQueue.main.async { self?.refreshNow() } }.store(in: &bag)
         installMouseMonitors()
     }
 
@@ -79,13 +94,23 @@ final class Coordinator: ObservableObject {
         guard let el = AX.focusedElement(), AX.pid(el) == front.processIdentifier,
               !AX.isSecure(el), AX.isEditableText(el) else { return stop(.idle) }
 
+        let appName = front.localizedName ?? "this app"
         if element == nil || !CFEqual(element!, el) {
             element = el
             lastValue = nil
+            host = AX.pageURL(el)?.host
             checker.reset()
+            checker.appBundleID = front.bundleIdentifier
             card.hide()
+        } else if tickCount % 8 == 0 {
+            host = AX.pageURL(el)?.host
         }
-        state = .watching(app: front.localizedName ?? "this app")
+        if settings.isDisabled(app: front.bundleIdentifier, host: host) {
+            stopChecking()
+            if state != .disabled(app: host ?? appName) { state = .disabled(app: host ?? appName) }
+            return
+        }
+        state = .watching(app: appName)
 
         let value = AX.value(el) ?? ""
         if value != lastValue {
@@ -100,11 +125,28 @@ final class Coordinator: ObservableObject {
         if state != s { state = s }
         if element != nil {
             element = nil
-            lastValue = nil
-            checker.reset()
+            host = nil
         }
+        stopChecking()
+    }
+
+    private func stopChecking() {
+        if lastValue != nil { lastValue = nil; checker.reset() }
         overlay.clear()
         card.hide()
+    }
+
+    /// Turns checking on or off for the current app (or, with `app: false`, the current website).
+    func setChecking(_ on: Bool, app: Bool) {
+        card.hide()
+        if app {
+            guard let id = frontApp?.bundleIdentifier else { return }
+            if on { settings.disabledApps.remove(id) } else { settings.disabledApps.insert(id) }
+        } else {
+            guard let h = host?.lowercased() else { return }
+            let site = h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+            if on { settings.disabledSites.remove(site); settings.disabledSites.remove(h) } else { settings.disabledSites.insert(site) }
+        }
     }
 
     /// Re-checks the current field now (after settings change or a replacement).
@@ -194,7 +236,7 @@ final class Coordinator: ObservableObject {
             return
         }
         if overlay.badgeHit(p), let b = overlay.badge {
-            if !card.isVisible { card.show(checker.issues, anchor: b.rect) }
+            if !card.isVisible { prepareCard(); card.show(checker.issues, anchor: b.rect) }
             card.cancelHide()
             return
         }
@@ -209,7 +251,14 @@ final class Coordinator: ObservableObject {
         guard let idx = issues.firstIndex(where: { $0.id == id }) else { return }
         let anchor = overlay.segments.filter { $0.issueID == id }.map(\.rect).reduce(CGRect.null) { $0.union($1) }
         guard !anchor.isNull else { return }
+        prepareCard()
         card.show([issues[idx]], anchor: anchor)
+    }
+
+    private func prepareCard() {
+        card.model.fixAllCount = checker.issues.filter { !$0.kind.isSentenceLevel }.count
+        card.model.appName = frontApp?.localizedName
+        card.model.host = host
     }
 
     // MARK: Actions
@@ -224,9 +273,48 @@ final class Coordinator: ObservableObject {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(issue.replacement, forType: .string)
                 Toast.shared.show("Couldn't edit this field. Suggestion copied, paste with ⌘V.", near: anchor)
+            } else {
+                offerUndo([issue], in: el, near: anchor)
             }
             refreshNow()
         }
+    }
+
+    /// Applies every word-level fix in the field, last to first so earlier ranges stay valid.
+    func fixAll() {
+        guard let el = element else { return }
+        card.hide()
+        let anchor = card.anchor
+        let fixes = checker.issues.filter { !$0.kind.isSentenceLevel }.sorted { $0.range.location > $1.range.location }
+        Task {
+            var applied: [Issue] = []
+            for f in fixes where await Replacer.replace(in: el, range: f.range, expected: f.original, with: f.replacement) != .failed {
+                applied.append(f)
+            }
+            if !applied.isEmpty { offerUndo(applied, in: el, near: anchor) }
+            refreshNow()
+        }
+    }
+
+    /// Shows "Fixed · Undo". `applied` are the issues as they were before replacing.
+    private func offerUndo(_ applied: [Issue], in el: AXUIElement, near anchor: CGRect) {
+        // Where each replacement now sits: shift by the size change of fixes before it.
+        var delta = 0
+        var placed: [(range: NSRange, now: String, before: String)] = []
+        for f in applied.sorted(by: { $0.range.location < $1.range.location }) {
+            let len = (f.replacement as NSString).length
+            placed.append((NSRange(location: f.range.location + delta, length: len), f.replacement, f.original))
+            delta += len - f.range.length
+        }
+        let message = applied.count == 1 ? "Fixed" : "Fixed \(applied.count) mistakes"
+        Toast.shared.show(message, near: anchor, action: ("Undo", { [weak self] in
+            Task {
+                for p in placed.reversed() {
+                    _ = await Replacer.replace(in: el, range: p.range, expected: p.now, with: p.before)
+                }
+                self?.refreshNow()
+            }
+        }), duration: 5)
     }
 
     func dismiss(_ issue: Issue) {
