@@ -112,7 +112,7 @@ final class Coordinator: ObservableObject {
 
     private func tick() {
         tickCount += 1
-        guard settings.isActive else { return stop(.off) }
+        guard settings.isActive else { overlay.hideWindows(); return stop(.off) }
         guard AX.isTrusted else { wasTrusted = false; return stop(.needsPermission) }
         if !wasTrusted {
             // Permission just arrived: event monitors made before it don't receive events, so make them again.

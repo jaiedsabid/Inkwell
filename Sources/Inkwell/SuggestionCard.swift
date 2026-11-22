@@ -16,7 +16,7 @@ final class FloatingPanel: NSPanel {
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        animationBehavior = .utilityWindow
+        animationBehavior = .none   // the card fades in by itself; no system zoom
     }
 
     override var canBecomeKey: Bool { allowKey }

@@ -46,6 +46,13 @@ final class OverlayController {
 
     func clear() { update(segments: [], badge: nil) }
 
+    /// Takes the windows off screen entirely (Inkwell turned off or paused).
+    func hideWindows() {
+        ghost = nil
+        update(segments: [], badge: nil)
+        windows.forEach { $0.orderOut(nil) }
+    }
+
     private func redraw() {
         for w in windows {
             let local = segments.filter { $0.rect.intersects(w.frame) }
@@ -53,10 +60,10 @@ final class OverlayController {
             let g = ghost.flatMap { $0.rect.intersects(w.frame) ? $0 : nil }
             w.canvas.set(segments: local, badge: b, hovered: hoveredID, origin: w.frame.origin)
             w.canvas.ghost = g
-            // Draw right now, before the window is shown or hidden. Otherwise macOS shows the window's last picture
-            // (the previous underline, in its old place) for a moment when it comes back.
+            // Draw right now. The window stays on screen (it's transparent and click-through) so marks never come with
+            // a show/hide transition or the window's previous picture.
             w.canvas.display()
-            if local.isEmpty && b == nil && g == nil { w.orderOut(nil) } else if !w.isVisible { w.orderFrontRegardless() }
+            if !w.isVisible && !(local.isEmpty && b == nil && g == nil) { w.orderFrontRegardless() }
             Log.write("overlay \(w.windowNumber): \(local.count) underlines, visible \(w.isVisible)", key: "overlay\(w.windowNumber)")
         }
     }
@@ -81,6 +88,8 @@ final class OverlayWindow: NSWindow {
         ignoresMouseEvents = true
         level = .floating
         isReleasedWhenClosed = false
+        // No zoom/fade when the window is shown: marks must appear exactly where they belong.
+        animationBehavior = .none
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         canvas.frame = CGRect(origin: .zero, size: screen.frame.size)
         canvas.autoresizingMask = [.width, .height]
