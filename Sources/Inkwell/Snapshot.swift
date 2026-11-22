@@ -26,6 +26,19 @@ enum Snapshot {
         render(ChatView(model: chat, accept: {}, close: {}), "chat", url)
         render(MenuContent().background(Color(nsColor: .windowBackgroundColor)), "menu", url)
         render(OnboardingView(finish: {}).background(Color(nsColor: .windowBackgroundColor)), "onboarding", url)
+        var sample: [String: DayStats] = [:]
+        for i in 0..<30 {
+            let date = Calendar.current.date(byAdding: .day, value: -i, to: Date())!
+            var d = DayStats()
+            d.words = [820, 1240, 460, 0, 1580, 990, 1310][i % 7] + i * 7
+            d.fixed = ["spelling": 6 + i % 4, "grammar": 4 + i % 3, "clarity": 2 + i % 2, "tone": i % 2]
+            d.found = ["spelling": 9, "grammar": 7, "clarity": 5, "tone": 2]
+            d.rewrites = i % 5
+            d.mistakes = ["recieve → receive": 2, "its → it's": 1, "alot → a lot": i % 2]
+            d.apps = ["Slack": d.words / 2, "Google Chrome": d.words / 3, "Mail": d.words / 6]
+            sample[Stats.key(date)] = d
+        }
+        Stats.shared.preview(sample)
         for pane in SettingsPane.allCases {
             SettingsNav.shared.pane = pane
             render(SettingsView(), "settings-\(pane.rawValue)", url)

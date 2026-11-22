@@ -41,6 +41,7 @@ struct MenuContent: View {
     @ObservedObject var settings = AppSettings.shared
     @ObservedObject var coordinator = Coordinator.shared
     @ObservedObject var checker = Coordinator.shared.checker
+    @ObservedObject var stats = Stats.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -66,6 +67,20 @@ struct MenuContent: View {
                 Text("Language").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 LanguagePicker(code: $settings.languageCode).labelsHidden().fixedSize()
+            }
+            if settings.collectStats {
+                let today = stats.summary(.day).total
+                Button { closeMenu(); AppDelegate.shared?.showSettings(.stats) } label: {
+                    HStack(spacing: 14) {
+                        MiniStat(value: today.words, label: "words today")
+                        MiniStat(value: today.fixedTotal, label: "fixes")
+                        MiniStat(value: today.rewrites, label: "rewrites")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             Divider()
             VStack(spacing: 2) {
@@ -209,6 +224,17 @@ struct ToggleRow: View {
             Text(title).lineLimit(1)
             Spacer()
             Toggle("", isOn: Binding(get: { isOn }, set: set)).toggleStyle(.switch).labelsHidden().controlSize(.mini)
+        }
+    }
+}
+
+struct MiniStat: View {
+    var value: Int
+    var label: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(value.formatted()).font(.system(size: 15, weight: .semibold, design: .rounded)).monospacedDigit()
+            Text(label).font(.caption2).foregroundStyle(.secondary)
         }
     }
 }

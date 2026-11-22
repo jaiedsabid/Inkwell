@@ -48,6 +48,11 @@ final class AppSettings: ObservableObject {
     @Published var autoDetectLanguage: Bool { didSet { save("autoDetectLanguage", autoDetectLanguage) } }
     @Published var strictness: Strictness { didSet { save("strictness", strictness) } }
     @Published var showExplanations: Bool { didSet { save("showExplanations", showExplanations) } }
+    /// Purple line when a sentence doesn't fit the tone.
+    @Published var toneCheck: Bool { didSet { save("toneCheck", toneCheck) } }
+    /// The user's own chat prompts, shown as chips in the chat panel.
+    @Published var savedPrompts: [SavedPrompt] { didSet { save("savedPrompts", savedPrompts) } }
+    @Published var collectStats: Bool { didSet { save("collectStats", collectStats) } }
 
     // Apps & privacy
     /// Tone per app, by bundle identifier. Apps not listed use `tone`.
@@ -84,6 +89,9 @@ final class AppSettings: ObservableObject {
         autoDetectLanguage = load("autoDetectLanguage", true)
         strictness = load("strictness", .standard)
         showExplanations = load("showExplanations", true)
+        toneCheck = load("toneCheck", true)
+        savedPrompts = load("savedPrompts", SavedPrompt.defaults)
+        collectStats = load("collectStats", true)
         appTones = load("appTones", [:])
         disabledApps = load("disabledApps", Self.defaultDisabledApps)
         disabledSites = load("disabledSites", [])
@@ -152,4 +160,16 @@ final class AppSettings: ObservableObject {
             catch { NSLog("Inkwell: launch at login failed: \(error)") }
         }
     }
+}
+
+struct SavedPrompt: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var title: String
+    var instruction: String
+
+    static let defaults: [SavedPrompt] = [
+        .init(title: "Polite no", instruction: "Turn this into a polite, friendly way of saying no."),
+        .init(title: "Bullet points", instruction: "Turn this into short, clear bullet points."),
+        .init(title: "Explain simply", instruction: "Rewrite this so anyone could understand it, without jargon."),
+    ]
 }

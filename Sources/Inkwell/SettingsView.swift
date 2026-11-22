@@ -2,13 +2,15 @@ import Combine
 import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, writing, apps, privacy, ai
+    case general, writing, apps, prompts, privacy, ai, stats
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: "General"
         case .writing: "Writing"
         case .apps: "Apps & Websites"
+        case .prompts: "Quick Prompts"
+        case .stats: "Writing Stats"
         case .privacy: "Dictionary & Privacy"
         case .ai: "AI Engine"
         }
@@ -18,6 +20,8 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "gearshape"
         case .writing: "textformat"
         case .apps: "square.grid.2x2"
+        case .prompts: "bookmark"
+        case .stats: "chart.bar"
         case .privacy: "book.closed"
         case .ai: "cpu"
         }
@@ -27,6 +31,8 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: .gray
         case .writing: .blue
         case .apps: .orange
+        case .prompts: .pink
+        case .stats: .teal
         case .privacy: .green
         case .ai: .purple
         }
@@ -63,6 +69,8 @@ struct SettingsView: View {
                 case .general: GeneralPane()
                 case .writing: WritingPane()
                 case .apps: AppsPane()
+                case .prompts: PromptsPane()
+                case .stats: StatsPane()
                 case .privacy: PrivacyPane()
                 case .ai: AIPane()
                 }
@@ -158,10 +166,17 @@ struct WritingPane: View {
                     Text("Explain each fix")
                     Text("A short line saying why, so you learn as you go.")
                 }
+                Toggle(isOn: $settings.toneCheck) {
+                    Text("Check tone")
+                    Text("A purple line when a sentence sounds off for your tone, like too blunt or too casual.")
+                }
             }
             Section("What the colors mean") {
                 ColorRow(color: Theme.red, style: "Wavy", title: "Mistake", detail: "Spelling or grammar. Hover to see the fix.")
                 ColorRow(color: Theme.blue, style: "Line", title: "Clearer sentence", detail: "The whole sentence could read better.")
+                if settings.toneCheck {
+                    ColorRow(color: Theme.purple, style: "Dashed", title: "Tone", detail: "The sentence doesn't match the tone you picked.")
+                }
             }
         }
     }
@@ -438,6 +453,43 @@ struct PrivacyRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+// MARK: - Quick prompts
+
+struct PromptsPane: View {
+    @ObservedObject var settings = AppSettings.shared
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach($settings.savedPrompts) { $p in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: "bookmark.fill").foregroundStyle(.pink)
+                            TextField("", text: $p.title, prompt: Text("Name")).textFieldStyle(.plain).labelsHidden().fontWeight(.semibold)
+                            Spacer()
+                            Button { settings.savedPrompts.removeAll { $0.id == p.id } } label: {
+                                Image(systemName: "trash").foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain).help("Delete")
+                        }
+                        TextField("", text: $p.instruction, prompt: Text("What should Inkwell do?"), axis: .vertical)
+                            .textFieldStyle(.plain).labelsHidden().foregroundStyle(.secondary).lineLimit(1...4)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .onMove { settings.savedPrompts.move(fromOffsets: $0, toOffset: $1) }
+                Button {
+                    settings.savedPrompts.append(SavedPrompt(title: "New prompt", instruction: ""))
+                } label: { Label("Add prompt", systemImage: "plus") }
+            } header: {
+                Text("Your prompts")
+            } footer: {
+                Text("These appear as buttons in the chat panel, next to Shorter, Friendlier and the others. You can also right-click anything you typed in the chat and choose “Save as a quick prompt”.")
             }
         }
     }

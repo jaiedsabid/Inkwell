@@ -7,7 +7,21 @@ suggestions and a chat panel for rewriting selected text.
 - **Blue line**: the whole sentence could be clearer. Hover to see a better version.
 - **⌥ Space** (configurable): with text selected, opens a chat panel. Ask for a change, refine it as many times as
   you like, then Accept to put it back. With nothing selected, it writes new text at the cursor.
-- **Menu bar icon**: turn Inkwell on or off everywhere, pause it, and switch tone or language.
+- **Purple dashed line**: the sentence doesn't fit your tone (optional).
+- **Menu bar icon**: turn Inkwell on or off everywhere, pause it, switch it off for the current app or website,
+  change tone or language, and see today's stats.
+
+## Features
+
+| Area | What you get |
+|---|---|
+| Checking | Spelling (offline), grammar, clearer sentences, tone check; relaxed / standard / picky; a short "why" under each fix |
+| Fixing | Accept, Dismiss, Fix all, Undo, Add to dictionary |
+| Chat panel | Free-form prompts and refinements; quick actions (Fix grammar, Shorter, Longer, Simpler, Friendlier, Professional, Confident); Translate; Draft a reply; your own saved prompts |
+| Writing | Main language with auto-detection, default tone plus a tone per app |
+| Control | On/off everywhere, pause (30 min, 1 hour, until tomorrow), off per app or website; password managers and terminals off by default; password fields never read |
+| AI | Anthropic or OpenAI with your own key (Keychain), or Apple's on-device model (macOS 26+) |
+| Stats | Words written, fixes, rewrites, accept rate, common mistakes, apps; today / 7 days / 30 days with trends. Counts only, stored locally |
 
 ## How it works
 

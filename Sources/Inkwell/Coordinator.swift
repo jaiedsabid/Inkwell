@@ -21,6 +21,8 @@ final class Coordinator: ObservableObject {
     /// Website the field is on (browsers only).
     @Published private(set) var host: String?
     private var lastValue: String?
+    private var lastWordCount = 0
+    private var seenIssues = Set<String>()
     private var timer: Timer?
     private var tickCount = 0
     private var hoverWork: DispatchWorkItem?
@@ -51,13 +53,19 @@ final class Coordinator: ObservableObject {
             }
         }
         checker.$issues.sink { [weak self] issues in
-            DispatchQueue.main.async { self?.card.refresh(with: issues); self?.layout() }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.card.refresh(with: issues)
+                self.layout()
+                for i in issues where self.seenIssues.insert(i.dismissKey).inserted { Stats.shared.found(i.kind) }
+            }
         }.store(in: &bag)
         // Re-check everything when the tone or language changes.
         settings.$tone.dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.checker.invalidate() } }.store(in: &bag)
         settings.$languageCode.dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.checker.invalidate() } }.store(in: &bag)
-        Publishers.Merge4(settings.$strictness.dropFirst().map { _ in () }, settings.$appTones.dropFirst().map { _ in () },
-                          settings.$dictionary.dropFirst().map { _ in () }, settings.$autoDetectLanguage.dropFirst().map { _ in () })
+        Publishers.Merge5(settings.$strictness.dropFirst().map { _ in () }, settings.$appTones.dropFirst().map { _ in () },
+                          settings.$dictionary.dropFirst().map { _ in () }, settings.$autoDetectLanguage.dropFirst().map { _ in () },
+                          settings.$toneCheck.dropFirst().map { _ in () })
             .sink { [weak self] in DispatchQueue.main.async { self?.checker.invalidate() } }.store(in: &bag)
         Publishers.Merge(settings.$disabledApps.dropFirst().map { _ in () }, settings.$disabledSites.dropFirst().map { _ in () })
             .sink { [weak self] in DispatchQueue.main.async { self?.refreshNow() } }.store(in: &bag)
@@ -101,6 +109,8 @@ final class Coordinator: ObservableObject {
             host = AX.pageURL(el)?.host
             checker.reset()
             checker.appBundleID = front.bundleIdentifier
+            seenIssues = []
+            lastWordCount = -1
             card.hide()
         } else if tickCount % 8 == 0 {
             host = AX.pageURL(el)?.host
@@ -115,6 +125,12 @@ final class Coordinator: ObservableObject {
         let value = AX.value(el) ?? ""
         if value != lastValue {
             lastValue = value
+            // Count words the user writes (not text that was already there or pasted in bulk).
+            let words = Stats.wordCount(value)
+            if lastWordCount >= 0, case let added = words - lastWordCount, added > 0, added < 40 {
+                Stats.shared.wordsWritten(added, app: front.localizedName)
+            }
+            lastWordCount = words
             checker.textChanged(value, cursor: AX.selectedRange(el)?.location)
         }
         // Positions move when the field scrolls or the window moves, so re-measure regularly.
@@ -274,6 +290,7 @@ final class Coordinator: ObservableObject {
                 NSPasteboard.general.setString(issue.replacement, forType: .string)
                 Toast.shared.show("Couldn't edit this field. Suggestion copied, paste with ⌘V.", near: anchor)
             } else {
+                Stats.shared.fixed(issue)
                 offerUndo([issue], in: el, near: anchor)
             }
             refreshNow()
@@ -290,6 +307,7 @@ final class Coordinator: ObservableObject {
             var applied: [Issue] = []
             for f in fixes where await Replacer.replace(in: el, range: f.range, expected: f.original, with: f.replacement) != .failed {
                 applied.append(f)
+                Stats.shared.fixed(f)
             }
             if !applied.isEmpty { offerUndo(applied, in: el, near: anchor) }
             refreshNow()
@@ -318,6 +336,7 @@ final class Coordinator: ObservableObject {
     }
 
     func dismiss(_ issue: Issue) {
+        Stats.shared.dismissed()
         checker.dismiss(issue)
         card.hide()
     }

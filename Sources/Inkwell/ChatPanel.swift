@@ -10,6 +10,8 @@ final class ChatModel: ObservableObject {
         var prompt: String
         /// What's sent to the AI when it differs from what's shown (quick actions).
         var instruction: String? = nil
+        /// A reply to the selected text rather than a new version of it.
+        var isReply = false
         var result: String?
         var error: String?
         var sent: String { instruction ?? prompt }
@@ -28,6 +30,8 @@ final class ChatModel: ObservableObject {
     var sourceEditable = true
 
     var latestResult: String? { turns.last?.result }
+    /// Accept copies instead of replacing: for replies, and text Inkwell can't edit.
+    var acceptCopies: Bool { turns.contains(where: \.isReply) || (!isWriteMode && !sourceEditable) }
     var isWriteMode: Bool { source.isEmpty }
     private var task: Task<Void, Never>?
 
@@ -47,7 +51,7 @@ final class ChatModel: ObservableObject {
 
     func send(_ action: QuickAction) {
         guard !loading else { return }
-        turns.append(Turn(prompt: action.title, instruction: action.instruction))
+        turns.append(Turn(prompt: action.title, instruction: action.instruction, isReply: action.isReply))
         run()
     }
 
@@ -212,6 +216,14 @@ struct ChatView: View {
                     .font(.callout)
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .background(Theme.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .contextMenu {
+                        if turn.instruction == nil {
+                            Button("Save as a quick prompt") {
+                                let title = turn.prompt.count > 24 ? String(turn.prompt.prefix(22)) + "…" : turn.prompt
+                                settings.savedPrompts.append(SavedPrompt(title: title, instruction: turn.prompt))
+                            }
+                        }
+                    }
             }
             if let result = turn.result {
                 VStack(alignment: .leading, spacing: 10) {
@@ -219,15 +231,21 @@ struct ChatView: View {
                     if isLast {
                         HStack(spacing: 8) {
                             Button(action: accept) {
-                                Label(model.isWriteMode || !model.sourceEditable ? "Insert" : "Accept", systemImage: "checkmark")
+                                if model.acceptCopies {
+                                    Label(model.turns.contains(where: \.isReply) ? "Copy reply" : "Copy", systemImage: "doc.on.doc")
+                                } else {
+                                    Label(model.isWriteMode ? "Insert" : "Accept", systemImage: "checkmark")
+                                }
                             }
                             .buttonStyle(PrimaryButtonStyle())
                             .keyboardShortcut(.return, modifiers: .command)
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(result, forType: .string)
-                            } label: { Label("Copy", systemImage: "doc.on.doc") }
-                            .buttonStyle(SecondaryButtonStyle())
+                            if !model.acceptCopies {
+                                Button {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(result, forType: .string)
+                                } label: { Label("Copy", systemImage: "doc.on.doc") }
+                                .buttonStyle(SecondaryButtonStyle())
+                            }
                             Spacer()
                             Text("Not quite? Type a change below.").font(.caption).foregroundStyle(.tertiary)
                         }
@@ -258,20 +276,42 @@ struct ChatView: View {
     private var quickActions: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(QuickAction.all) { a in
-                    Button { model.send(a) } label: {
-                        Label(a.title, systemImage: a.symbol)
-                            .font(.system(size: 11.5, weight: .medium))
-                            .padding(.horizontal, 9).padding(.vertical, 5)
-                            .background(Color.primary.opacity(0.07), in: Capsule())
-                            .contentShape(Capsule())
+                if !model.isWriteMode && model.turns.isEmpty {
+                    chip(QuickAction.reply)
+                }
+                ForEach(QuickAction.all) { chip($0) }
+                Menu {
+                    let main = settings.language
+                    Button("\(main.name)") { model.send(QuickAction.translate(to: main.name)) }
+                    Divider()
+                    ForEach(WritingLanguage.all.filter { $0 != main }) { lang in
+                        Button(lang.name) { model.send(QuickAction.translate(to: lang.name)) }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(model.loading)
+                } label: {
+                    chipLabel("Translate", "globe")
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                .disabled(model.loading)
+                ForEach(settings.savedPrompts) { p in
+                    chip(QuickAction(title: p.title, symbol: "bookmark", instruction: p.instruction))
                 }
             }
             .padding(.horizontal, 14).padding(.top, 10)
         }
+    }
+
+    private func chip(_ a: QuickAction) -> some View {
+        Button { model.send(a) } label: { chipLabel(a.title, a.symbol) }
+            .buttonStyle(.plain)
+            .disabled(model.loading)
+    }
+
+    private func chipLabel(_ title: String, _ symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.system(size: 11.5, weight: .medium))
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(Color.primary.opacity(0.07), in: Capsule())
+            .contentShape(Capsule())
     }
 
     private var inputBar: some View {
@@ -356,7 +396,9 @@ final class ChatController {
     private func accept() {
         guard let result = model.latestResult else { return }
         let el = model.element, range = model.range, source = model.source, app = model.app
-        let editable = model.sourceEditable
+        let editable = model.sourceEditable && !model.acceptCopies
+        let isReply = model.turns.contains(where: \.isReply)
+        Stats.shared.rewrite()
         panel.orderOut(nil)
         Task {
             app?.activate()
@@ -375,7 +417,7 @@ final class ChatController {
             if !done {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(result, forType: .string)
-                Toast.shared.show("Copied. Paste it with ⌘V.")
+                Toast.shared.show(isReply ? "Reply copied. Click into the reply box and press ⌘V." : "Copied. Paste it with ⌘V.", duration: 4)
             }
             model.reset()
         }
@@ -386,7 +428,18 @@ struct QuickAction: Identifiable {
     var title: String
     var symbol: String
     var instruction: String
+    var isReply = false
     var id: String { title }
+
+    static let reply = QuickAction(
+        title: "Draft a reply", symbol: "arrowshape.turn.up.left",
+        instruction: "The text above is a message I received. Write the reply I should send, in my tone. Reply with only the message itself.",
+        isReply: true)
+
+    static func translate(to language: String) -> QuickAction {
+        .init(title: "Translate to \(language)", symbol: "globe",
+              instruction: "Translate it into \(language). Keep the meaning, tone and formatting.")
+    }
 
     static let all: [QuickAction] = [
         .init(title: "Fix grammar", symbol: "checkmark.circle", instruction: "Fix spelling, grammar and punctuation only. Change nothing else."),

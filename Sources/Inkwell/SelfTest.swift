@@ -79,6 +79,28 @@ enum SelfTest {
         check(!sp2.contains { $0.original == "teh" }, "dictionary words are not flagged")
         check(TextTools.isSkippable("API") && TextTools.isSkippable("user@x.com") && !TextTools.isSkippable("hello"), "skips acronyms and addresses")
 
+        // Phase 3: tone check prompt, stats
+        let sys3 = CheckPrompt.system(.init(languageName: "English (US)", tone: .friendly, strictness: .standard, toneCheck: true))
+        check(sys3.contains("\"tone\": the sentence doesn't fit") && !sys3.contains("Never use the kind"), "tone check adds the tone kind")
+        check(Stats.wordCount("Hello, big world!") == 3 && Stats.wordCount("") == 0, "word count")
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("inkwell-selftest-\(UUID().uuidString).json")
+        let st = Stats(file: tmp)
+        if AppSettings.shared.collectStats {
+            st.wordsWritten(12, app: "Notes")
+            st.fixed(Issue(range: NSRange(location: 0, length: 3), kind: .spelling, original: "teh", replacement: "the", explanation: ""))
+            st.found(.spelling); st.found(.grammar)
+            let sum = st.summary(.day)
+            check(sum.total.words == 12 && sum.total.apps["Notes"] == 12, "stats count words by app")
+            check(sum.topMistakes.first?.0 == "teh → the", "stats keep common mistakes")
+            check(sum.acceptRate == 0.5, "accept rate")
+            check(st.summary(.month).perDay.count == 30 && st.summary(.week).perDay.last?.stats.words == 12, "week/month ranges end today")
+            st.save()
+            check(Stats(file: tmp).summary(.day).total.words == 12, "stats persist to disk")
+        }
+        try? FileManager.default.removeItem(at: tmp)
+        let replyMsgs = ChatPrompt.messages(source: "Can you join Friday?", turns: [ChatModel.Turn(prompt: "Draft a reply", instruction: QuickAction.reply.instruction, isReply: true)])
+        check(replyMsgs.first?.text.contains("message I received") == true, "reply helper prompt")
+
         print(failures == 0 ? "All passed" : "\(failures) failed")
         return failures == 0
     }

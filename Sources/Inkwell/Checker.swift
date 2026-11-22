@@ -244,7 +244,7 @@ final class Checker: ObservableObject {
     var options: CheckPrompt.Options {
         let s = AppSettings.shared
         return .init(languageName: language.name, tone: s.tone(for: appBundleID), strictness: s.strictness,
-                     toneCheck: false, dictionary: s.dictionary)
+                     toneCheck: s.toneCheck, dictionary: s.dictionary)
     }
 
     private func detectLanguage() {
