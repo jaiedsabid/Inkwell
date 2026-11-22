@@ -201,6 +201,9 @@ final class Checker: ObservableObject {
     private var requesting = false
     private var rerunAfterRequest = false
     private var debounce: DispatchWorkItem?
+    private var settle: DispatchWorkItem?
+    /// True once the user has paused typing, so the word at the cursor gets checked too.
+    private var cursorSettled = false
     var dismissed = Set<String>()
 
     /// Called when the text changes. Updates marks right away, then schedules an AI pass.
@@ -208,7 +211,17 @@ final class Checker: ObservableObject {
         text = newText
         self.cursor = cursor
         detectLanguage()
+        cursorSettled = false
         recompute()
+        // A short pause after typing is enough to check the word under the cursor (no space needed).
+        settle?.cancel()
+        let s = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.cursorSettled = true
+            self.recompute()
+        }
+        settle = s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: s)
         debounce?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.runAI() }
         debounce = work
@@ -217,6 +230,7 @@ final class Checker: ObservableObject {
 
     func reset() {
         debounce?.cancel()
+        settle?.cancel()
         text = ""
         cursor = nil
         detected = nil
@@ -291,7 +305,7 @@ final class Checker: ObservableObject {
 
     /// Don't flag the word the cursor is still in.
     private func isBeingTyped(_ r: NSRange) -> Bool {
-        guard let c = cursor else { return false }
+        guard !cursorSettled, let c = cursor else { return false }
         return c >= r.location && c <= NSMaxRange(r)
     }
 
