@@ -88,6 +88,7 @@ struct SettingsView: View {
 // MARK: - General
 
 struct GeneralPane: View {
+    @ObservedObject private var updater = AppUpdater.shared
     @ObservedObject var settings = AppSettings.shared
     @Loc private var trusted = AX.isTrusted
     private let poll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -132,6 +133,22 @@ struct GeneralPane: View {
                     Text("Lets Inkwell see the text field you're typing in and apply fixes. Password fields are always skipped.")
                 }
                 if !trusted { PermissionHelp().frame(maxWidth: .infinity, alignment: .leading) }
+            }
+            Section("Updates") {
+                LabeledContent {
+                    Button("Check for Updates…") { updater.checkForUpdates() }.disabled(!updater.canCheck)
+                } label: {
+                    Text("Inkwell \(Self.version)")
+                    if let d = updater.lastChecked {
+                        Text("Last checked \(d.formatted(.relative(presentation: .named))).")
+                    } else {
+                        Text("New versions come from github.com/jaiedsabid/Inkwell.")
+                    }
+                }
+                Toggle(isOn: $updater.checksAutomatically) {
+                    Text("Check for updates automatically")
+                    Text("Once a day. Inkwell asks before installing anything.")
+                }
             }
             Section("About") {
                 LabeledContent("Version", value: Self.version)

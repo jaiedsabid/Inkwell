@@ -3,3 +3,6 @@ dist/
 .DS_Store
 .swiftpm/
 Vendor/
+
+# Private release notes (key locations, backups); kept local only
+docs/releasing.md

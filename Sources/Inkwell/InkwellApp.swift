@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         Log.removeOldFormat()
+        _ = AppUpdater.shared   // starts Sparkle's scheduled checks
         let settings = AppSettings.shared
         StatusMenu.shared.install()
         Coordinator.shared.start()

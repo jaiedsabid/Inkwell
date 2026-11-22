@@ -127,7 +127,7 @@ Spelling and the instant checks work with no AI at all. For grammar, clarity, re
 
 ### Updates
 
-Inkwell doesn't update itself yet. To hear about new versions, click **Watch → Custom → Releases** on this repository, then download the new DMG and replace the app. Your settings, dictionary and models are kept.
+Inkwell checks for a new version once a day and asks before installing anything. To check now, open **Settings → General → Check for Updates…**; you can also switch automatic checks off there. Updates are signed, and Inkwell verifies the signature before installing. Your settings, dictionary and models are kept, and so is the Accessibility permission.
 
 ### Uninstall
 
@@ -138,7 +138,7 @@ Quit Inkwell from its menu, drag it from Applications to the Trash, and if you l
 - Inkwell reads the text field you're typing in through the macOS Accessibility API. **Password fields are never read**, and password managers and terminals are switched off by default. You can switch Inkwell off for any app or website.
 - Spelling and the instant checks run offline. With a local model, Apple's on-device model or a local Ollama, nothing you write leaves your Mac.
 - With a cloud provider, the sentences being checked or rewritten are sent to that provider with your key, and nothing else.
-- No analytics, no crash reporting, no account, no ads. The only other network use is downloading a model from Hugging Face when you ask for one.
+- No analytics, no crash reporting, no account, no ads. The only other network use is downloading a model from Hugging Face when you ask for one, and the update check: once a day, a request for the update feed on GitHub (switch it off in Settings → General).
 - Settings, your dictionary and writing stats (counts only, never your text) stay in your user folder. API keys are kept in the Keychain.
 - Accepting a fix doesn't go through your clipboard, so clipboard managers don't fill up with Inkwell's edits.
 
@@ -154,7 +154,7 @@ SKIP_DMG=1 ./build.sh            # the app only
 dist/Inkwell.app/Contents/MacOS/Inkwell --localtest gemma4-e2b   # downloads a model and runs checks and suggestions
 ```
 
-Run `scripts/signing_identity.sh create` once so every build has the same signature; otherwise macOS asks for Accessibility again after each build. Releases are made with `scripts/release.sh` (see [CHANGELOG.md](CHANGELOG.md)).
+Run `scripts/signing_identity.sh create` once so every build has the same signature; otherwise macOS asks for Accessibility again after each build. More in [docs/development.md](docs/development.md). Releases are made with `scripts/release.sh` (see [CHANGELOG.md](CHANGELOG.md)): it builds the DMG, signs it for [Sparkle](https://sparkle-project.org) with the update key in the Keychain, and attaches `appcast.xml` to the GitHub release, where the app looks for updates.
 
 ## Support
 

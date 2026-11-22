@@ -4,6 +4,11 @@ All notable changes to Inkwell are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+
+- **Automatic updates** with [Sparkle](https://sparkle-project.org): Inkwell checks once a day and asks before installing; Settings → General has Check for Updates… and a switch for automatic checks. Updates are signed and verified, and settings and the Accessibility permission are kept.
+- The app now lists its copyright and category (Productivity).
+
 ## [0.1.1] - 2026-11-23
 
 ### Fixed

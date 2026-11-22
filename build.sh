@@ -12,6 +12,11 @@ cp .build/release/Inkwell $APP/Contents/MacOS/Inkwell
 # The local model engine
 mkdir -p $APP/Contents/Frameworks
 ditto Vendor/llama.xcframework/macos-arm64_x86_64/llama.framework $APP/Contents/Frameworks/llama.framework
+# Sparkle, for software updates. Inkwell isn't sandboxed, so Sparkle's XPC services aren't needed.
+SPARKLE="$(find .build/artifacts -type d -name Sparkle.framework -path '*macos-*' | head -1)"
+[ -n "$SPARKLE" ] || { echo "Sparkle.framework not found in .build/artifacts; run swift package resolve." >&2; exit 1; }
+ditto "$SPARKLE" $APP/Contents/Frameworks/Sparkle.framework
+rm -rf $APP/Contents/Frameworks/Sparkle.framework/XPCServices $APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices
 cat > $APP/Contents/Info.plist <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -27,6 +32,15 @@ cat > $APP/Contents/Info.plist <<PL
 <key>LSMinimumSystemVersion</key><string>15.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
+<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+<key>NSHumanReadableCopyright</key><string>© 2026 Jaied Al Sabid. MIT License.</string>
+<key>SUFeedURL</key><string>https://github.com/jaiedsabid/Inkwell/releases/latest/download/appcast.xml</string>
+<key>SUPublicEDKey</key><string>5Y3IRyxg6tWBWf7juKrrMHcM2Arxkxceb8KqhhKMWk4=</string>
+<key>SUEnableAutomaticChecks</key><true/>
+<key>SUAllowsAutomaticUpdates</key><false/>
+<key>SUScheduledCheckInterval</key><integer>86400</integer>
 </dict></plist>
 PL
 cp Resources/AppIcon.icns Resources/MenuIcon.png Resources/MenuIcon@2x.png Resources/MenuIcon@3x.png $APP/Contents/Resources/
@@ -38,6 +52,11 @@ if [ -z "$IDENTITY" ]; then
 fi
 if [ "$IDENTITY" = "-" ]; then IDENTITY=""; fi
 codesign --force --sign "${IDENTITY:--}" $APP/Contents/Frameworks/llama.framework
+# Sparkle inside out: its helpers, then the framework.
+SFW=$APP/Contents/Frameworks/Sparkle.framework/Versions/B
+codesign --force --sign "${IDENTITY:--}" $SFW/Autoupdate
+codesign --force --sign "${IDENTITY:--}" $SFW/Updater.app
+codesign --force --sign "${IDENTITY:--}" $APP/Contents/Frameworks/Sparkle.framework
 codesign --force --sign "${IDENTITY:--}" $APP
 if [ -n "$IDENTITY" ]; then echo "Signed with the fixed identity $IDENTITY"
 else echo "Signed ad hoc: macOS asks for Accessibility again after every build. Run scripts/signing_identity.sh create for a fixed identity." >&2; fi
