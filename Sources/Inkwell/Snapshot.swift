@@ -54,6 +54,11 @@ enum Snapshot {
             sample[Stats.key(date)] = d
         }
         Stats.shared.preview(sample)
+        let savedEngine = AppSettings.shared.engine
+        SettingsNav.shared.pane = .ai
+        AppSettings.shared.engine = .local
+        render(SettingsView(), "settings-local", url)
+        AppSettings.shared.engine = savedEngine
         for pane in SettingsPane.allCases {
             SettingsNav.shared.pane = pane
             render(SettingsView(), "settings-\(pane.rawValue)", url)

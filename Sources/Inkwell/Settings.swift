@@ -2,9 +2,15 @@ import AppKit
 import ServiceManagement
 
 enum EngineKind: String, CaseIterable, Codable, Identifiable {
-    case cloud, onDevice
+    case cloud, local, onDevice
     var id: String { rawValue }
-    var label: String { self == .cloud ? "Cloud AI (your key)" : "On-device (private)" }
+    var label: String {
+        switch self {
+        case .cloud: "Cloud AI"
+        case .local: "Local model"
+        case .onDevice: "Apple on-device"
+        }
+    }
 }
 
 enum Provider: String, CaseIterable, Codable, Identifiable {
@@ -72,6 +78,10 @@ final class AppSettings: ObservableObject {
     }
     @Published var checkModel: String { didSet { save("checkModel", checkModel) } }
     @Published var chatModel: String { didSet { save("chatModel", chatModel) } }
+    /// The downloaded model in use (catalog id or "hf:owner/repo/file").
+    @Published var localModelID: String? { didSet { save("localModelID", localModelID) } }
+    /// Models added from Hugging Face by the user.
+    @Published var customModels: [LocalModel] { didSet { save("customModels", customModels) } }
 
     private init() {
         func load<T: Decodable>(_ key: String, _ def: T) -> T {
@@ -100,6 +110,8 @@ final class AppSettings: ObservableObject {
         provider = load("provider", .anthropic)
         checkModel = load("checkModel", Provider.anthropic.defaultCheckModel)
         chatModel = load("chatModel", Provider.anthropic.defaultChatModel)
+        localModelID = load("localModelID", nil as String?)
+        customModels = load("customModels", [])
     }
 
     private func save<T: Encodable>(_ key: String, _ value: T) {

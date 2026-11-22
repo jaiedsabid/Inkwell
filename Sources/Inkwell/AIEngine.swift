@@ -12,11 +12,12 @@ struct ChatMessage: Equatable {
 enum AIPurpose { case check, chat }
 
 enum AIError: LocalizedError {
-    case noKey, onDeviceUnavailable(String), http(Int, String), refused, badResponse, cancelled
+    case noKey, noLocalModel, onDeviceUnavailable(String), http(Int, String), refused, badResponse, cancelled
 
     var errorDescription: String? {
         switch self {
         case .noKey: "Add your API key in Settings → AI Engine."
+        case .noLocalModel: "Download a local model in Settings → AI Engine."
         case .onDeviceUnavailable(let why): "On-device AI isn't available: \(why)"
         case .http(let code, let msg): "The AI service returned an error (\(code)). \(msg)"
         case .refused: "The AI declined this request."
@@ -205,6 +206,10 @@ enum AI {
             if #available(macOS 26.0, *) { return OnDeviceClient() }
             #endif
             throw AIError.onDeviceUnavailable("needs macOS 26 or later")
+        case .local:
+            let store = ModelStore.shared
+            guard let m = store.model(s.localModelID), store.installed.contains(m.id) else { throw AIError.noLocalModel }
+            return LocalClient(model: m, path: store.path(m).path)
         case .cloud:
             guard let key = Keychain.get(s.provider) else { throw AIError.noKey }
             switch s.provider {
@@ -218,6 +223,7 @@ enum AI {
         let s = AppSettings.shared
         switch s.engine {
         case .onDevice: return OnDevice.unavailableReason == nil
+        case .local: return ModelStore.shared.model(s.localModelID).map { ModelStore.shared.installed.contains($0.id) } ?? false
         case .cloud: return Keychain.get(s.provider) != nil
         }
     }

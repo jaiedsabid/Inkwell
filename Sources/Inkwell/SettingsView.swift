@@ -218,7 +218,9 @@ struct AIPane: View {
                 .pickerStyle(.segmented)
                 Text(settings.engine == .cloud
                      ? "Best quality. Your text is sent to the provider you choose, using your own API key."
-                     : "Runs on this Mac with Apple's on-device model. Nothing leaves your computer.")
+                     : settings.engine == .local
+                     ? "Download a free model from Hugging Face and run it on this Mac. Private and works offline."
+                     : "Uses Apple's built-in model (macOS 26 with Apple Intelligence). Nothing to download.")
                     .font(.callout).foregroundStyle(.secondary)
             }
 
@@ -259,6 +261,8 @@ struct AIPane: View {
                 } footer: {
                     Text("Live checking runs often, so a fast, low-cost model works best. Rewrites use a stronger model.")
                 }
+            } else if settings.engine == .local {
+                LocalModelsSection()
             } else {
                 Section("Status") {
                     if let why = OnDevice.unavailableReason {
@@ -425,7 +429,7 @@ struct PrivacyPane: View {
                 PrivacyRow(symbol: "lock.fill", title: "Password fields are never read", detail: "Secure fields are skipped in every app.")
                 PrivacyRow(symbol: "hand.raised.fill", title: "Off in password managers and terminals", detail: "Change this in Apps & Websites.")
                 PrivacyRow(symbol: "internaldrive", title: "Spelling is checked on your Mac",
-                           detail: settings.engine == .onDevice
+                           detail: settings.engine != .cloud
                                ? "Grammar and rewrites also run on your Mac. Nothing is sent anywhere."
                                : "For grammar and rewrites, only the sentences being checked are sent to \(settings.provider.label), using your key. Inkwell has no servers and keeps no copy.")
                 PrivacyRow(symbol: "key.fill", title: "Your API key stays in the Keychain", detail: "It's only sent to your provider.")

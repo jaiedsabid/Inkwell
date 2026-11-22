@@ -462,11 +462,13 @@ final class Checker: ObservableObject {
             pending.sort { abs($0.range.location - c) < abs($1.range.location - c) }
         }
         // The on-device model is much slower: small batches, nearest sentences first.
-        pending = Array(pending.prefix(AppSettings.shared.engine == .onDevice ? 4 : 20))
+        pending = Array(pending.prefix(AppSettings.shared.engine == .cloud ? 20 : 4))
 
         let client: LLMClient
         do { client = try AI.client() } catch {
-            status = (error as? AIError).map { if case .noKey = $0 { return .needsSetup } else { return .error($0.localizedDescription) } } ?? .error(error.localizedDescription)
+            status = (error as? AIError).map {
+                switch $0 { case .noKey, .noLocalModel: return .needsSetup; default: return .error($0.localizedDescription) }
+            } ?? .error(error.localizedDescription)
             return
         }
 

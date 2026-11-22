@@ -130,11 +130,29 @@ struct OnboardingView: View {
             hero("cpu", "Choose your AI", "Spelling works offline right away. Grammar, rewrites and chat need an AI.")
             HStack(spacing: 12) {
                 EngineCard(selected: settings.engine == .cloud, symbol: "cloud", title: "Cloud AI", detail: "Best quality. Uses your own Anthropic or OpenAI key.") { settings.engine = .cloud }
-                EngineCard(selected: settings.engine == .onDevice, symbol: "lock.laptopcomputer", title: "On-device",
+                EngineCard(selected: settings.engine == .local, symbol: "arrow.down.circle", title: "Local model",
+                           detail: "Free and private. Download a model like Gemma 4 from Hugging Face.") { settings.engine = .local }
+                EngineCard(selected: settings.engine == .onDevice, symbol: "apple.logo", title: "Apple",
                            detail: OnDevice.unavailableReason.map { "Not available: \($0)." } ?? "Private. Nothing leaves your Mac.") { settings.engine = .onDevice }
                     .disabled(!OnDevice.isSupportedOS)
             }
-            .frame(maxWidth: 460)
+            .frame(maxWidth: 520)
+            if settings.engine == .local {
+                let rec = ModelStore.shared.model(MacInfo.recommendedID())
+                VStack(alignment: .leading, spacing: 8) {
+                    if let rec {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Recommended for your Mac: \(rec.name)").fontWeight(.semibold)
+                                Text("\(rec.sizeText) download. You can pick another model later in Settings.").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            LocalDownloadButton(model: rec)
+                        }
+                    }
+                }
+                .frame(maxWidth: 520)
+            }
             if settings.engine == .cloud {
                 VStack(alignment: .leading, spacing: 8) {
                     Picker("Provider", selection: $settings.provider) {
@@ -229,6 +247,25 @@ struct PermissionHelp: View {
                 .frame(maxWidth: 420, alignment: .leading)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
+        }
+    }
+}
+
+/// Download button with progress, used in onboarding.
+struct LocalDownloadButton: View {
+    let model: LocalModel
+    @ObservedObject var store = ModelStore.shared
+
+    var body: some View {
+        if store.installed.contains(model.id) {
+            Label("Ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+        } else if let p = store.progress[model.id] {
+            HStack(spacing: 8) {
+                ProgressView(value: p).frame(width: 110).tint(Theme.accent)
+                Text("\(Int(p * 100))%").font(.caption).monospacedDigit().frame(width: 34)
+            }
+        } else {
+            Button("Download") { store.download(model) }.buttonStyle(.borderedProminent).tint(Theme.accent)
         }
     }
 }

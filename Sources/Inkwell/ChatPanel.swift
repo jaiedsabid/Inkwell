@@ -122,6 +122,14 @@ enum ChatPrompt {
     /// Strips wrappers some models add despite the instructions.
     static func clean(_ s: String) -> String {
         var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Drop an intro line some (especially small, local) models add: "Here is the revised text:".
+        if let nl = t.firstIndex(of: "\n") {
+            let first = t[..<nl].trimmingCharacters(in: .whitespaces).lowercased()
+            let intros = ["here is", "here's", "sure", "certainly", "revised", "rewritten", "translation", "okay", "ok,"]
+            if first.hasSuffix(":") && first.count < 80 && intros.contains(where: { first.hasPrefix($0) }) {
+                t = String(t[t.index(after: nl)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
         if t.hasPrefix("<<<") { t = String(t.dropFirst(3)) }
         if t.hasSuffix(">>>") { t = String(t.dropLast(3)) }
         if t.count > 2, t.first == "\"", t.last == "\"", !t.dropFirst().dropLast().contains("\"") { t = String(t.dropFirst().dropLast()) }

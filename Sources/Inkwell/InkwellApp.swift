@@ -28,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
         if CommandLine.arguments.contains("--selftest") { exit(SelfTest.run() ? 0 : 1) }
+        if let i = CommandLine.arguments.firstIndex(of: "--localtest"), i + 1 < CommandLine.arguments.count {
+            let id = CommandLine.arguments[i + 1]
+            Task { let ok = await SelfTest.localTest(id); LlamaEngine.shared.shutdown(); exit(ok ? 0 : 1) }; return
+        }
         if CommandLine.arguments.contains("--aitest") { Task { exit(await SelfTest.aiTest() ? 0 : 1) }; return }
         if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
             Snapshot.run(to: CommandLine.arguments[i + 1]); exit(0)
@@ -46,6 +50,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if !settings.onboarded || !AX.isTrusted { showOnboarding() }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        LlamaEngine.shared.shutdown()
+        Stats.shared.save()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

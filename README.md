@@ -20,7 +20,7 @@ suggestions and a chat panel for rewriting selected text.
 | Chat panel | Free-form prompts and refinements; quick actions (Fix grammar, Shorter, Longer, Simpler, Friendlier, Professional, Confident); Translate; Draft a reply; your own saved prompts |
 | Writing | Main language with auto-detection, default tone plus a tone per app |
 | Control | On/off everywhere, pause (30 min, 1 hour, until tomorrow), off per app or website; password managers and terminals off by default; password fields never read |
-| AI | Anthropic or OpenAI with your own key (Keychain), or Apple's on-device model (macOS 26+) |
+| AI | Anthropic or OpenAI with your own key (Keychain); local models from Hugging Face (Gemma 4, Gemma 3, Qwen 3.5, Llama 3.x, or any GGUF) run by the bundled llama.cpp, with a recommendation based on the Mac's memory; or Apple's on-device model (macOS 26+) |
 | Stats | Words written, fixes, rewrites, accept rate, common mistakes, apps; today / 7 days / 30 days with trends. Counts only, stored locally |
 
 ## How it works
@@ -39,13 +39,15 @@ Because it needs Accessibility access, Inkwell can't be sandboxed, so it's distr
 
 ## Build
 
-Needs only the Command Line Tools (no Xcode). macOS 15 or later.
+Needs only the Command Line Tools (no Xcode). macOS 15 or later. `build.sh` first runs `scripts/fetch_llama.sh`, which
+downloads the pinned llama.cpp framework (checked by SHA-256) into `Vendor/`.
 
 ```bash
 ./build.sh                       # dist/Inkwell.app and dist/Inkwell.dmg
 SKIP_DMG=1 ./build.sh            # app only
 .build/release/Inkwell --selftest
 .build/debug/Inkwell --snapshot /tmp/inkwell-shots   # renders the main screens to PNG
+dist/Inkwell.app/Contents/MacOS/Inkwell --localtest gemma4-e2b   # downloads a model and runs a check and a rewrite
 ```
 
 Run `scripts/signing_identity.sh create` once so every build has the same signature; otherwise macOS asks for

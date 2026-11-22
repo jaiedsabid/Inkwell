@@ -59,6 +59,14 @@ enum SelfTest {
         check(msgs.count == 3 && msgs[1].role == .assistant && msgs[2].text == "friendlier", "chat history replays refinements")
         check(ChatPrompt.clean("\"Hello there.\"") == "Hello there.", "strips wrapping quotes")
         check(ChatPrompt.clean("She said \"hi\" to me.") == "She said \"hi\" to me.", "keeps inner quotes")
+        check(ChatPrompt.clean("Here is the revised text:\n\n\"Please send it.\"") == "Please send it.", "drops intro line and quotes")
+        check(ChatPrompt.clean("Note: send it today.\nThanks") == "Note: send it today.\nThanks", "keeps a real first line")
+        let g = GBNF.from(CheckPrompt.schema)
+        if CommandLine.arguments.contains("--print-grammar") { print(g) }
+        check(g.contains("root ::= \"{\" ws \"\\\"issues\\\"\"") && g.contains("\"\\\"spelling\\\"\" | ") && g.contains("string ::="), "JSON grammar built from schema")
+        let g4 = LlamaEngine.format(template: "{{ '<|turn>user' }}", turns: [("system", "S"), ("user", "U")]) { _, _ in nil }
+        check(g4 == "<|turn>system\nS<turn|>\n<|turn>user\nU<turn|>\n<|turn>model\n", "Gemma 4 prompt format")
+        check(MacInfo.recommendedID(memoryGB: 8) == "qwen35-4b" && MacInfo.recommendedID(memoryGB: 16) == "gemma4-e2b" && MacInfo.recommendedID(memoryGB: 36) == "gemma4-e4b", "model recommendation by memory")
 
         // Phase 2: dictionary, strictness, quick actions, site matching
         let sys2 = CheckPrompt.system(.init(languageName: "English (US)", tone: .casual, strictness: .relaxed, toneCheck: false, dictionary: ["Inkwell", "Jaied"]))
@@ -139,6 +147,46 @@ enum SelfTest {
             for (id, list) in parsed.sorted(by: { $0.key < $1.key }) {
                 for i in list { print("  [\(id)] \(i.kind.rawValue): \"\(i.original)\" → \"\(i.replacement)\" (\(i.explanation))") }
             }
+            return true
+        } catch {
+            print("Failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// `Inkwell --localtest MODEL_ID`: downloads a catalog model if needed, then runs a check and a rewrite with it.
+    static func localTest(_ id: String) async -> Bool {
+        let store = ModelStore.shared
+        guard let m = store.model(id) else { print("Unknown model \(id)"); return false }
+        if !store.installed.contains(id) {
+            print("Downloading \(m.name) (\(m.sizeText))…")
+            store.download(m)
+            var last = -1
+            while store.progress[id] != nil {
+                let p = Int((store.progress[id] ?? 0) * 100)
+                if p / 10 != last / 10 { print("  \(p)%"); last = p }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            if let e = store.errors[id] { print("Download failed: \(e)"); return false }
+        }
+        let client = LocalClient(model: m, path: store.path(m).path)
+        let sentences = [1: "I has a apple and it are red.", 2: "The meeting that we had was a meeting where things were discussed by us.", 3: "Thanks for your help."]
+        do {
+            var t = Date()
+            let opts = CheckPrompt.Options(languageName: "English (US)", tone: .professional, strictness: .standard, toneCheck: false)
+            let raw = try await client.complete(system: CheckPrompt.system(opts),
+                                                messages: [.init(role: .user, text: CheckPrompt.user(sentences.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }))],
+                                                jsonSchema: CheckPrompt.schema, purpose: .check)
+            print(String(format: "Check (incl. loading) %.1fs", Date().timeIntervalSince(t)))
+            guard let parsed = CheckPrompt.parse(raw, sentences: sentences) else { print("Unreadable:\n\(raw)"); return false }
+            for (sid, list) in parsed.sorted(by: { $0.key < $1.key }) {
+                for i in list { print("  [\(sid)] \(i.kind.rawValue): \"\(i.original)\" → \"\(i.replacement)\"") }
+            }
+            t = Date()
+            let chat = try await client.complete(system: ChatPrompt.system(tone: .professional, language: "English (US)", writeMode: false),
+                                                 messages: ChatPrompt.messages(source: "hey can u send me the report by tmrw its urgent", turns: [.init(prompt: "make it professional")]),
+                                                 jsonSchema: nil, purpose: .chat)
+            print(String(format: "Rewrite %.1fs: %@", Date().timeIntervalSince(t), ChatPrompt.clean(chat)))
             return true
         } catch {
             print("Failed: \(error.localizedDescription)")
