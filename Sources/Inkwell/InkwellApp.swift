@@ -5,15 +5,10 @@ import SwiftUI
 @main
 struct InkwellApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @ObservedObject private var settings = AppSettings.shared
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuContent()
-        } label: {
-            Image(systemName: settings.isActive ? "pencil.line" : "pencil.slash")
-        }
-        .menuBarExtraStyle(.window)
+        // The menu bar icon and panel are AppKit (StatusMenu); SwiftUI only needs a scene here.
+        Settings { EmptyView() }
     }
 }
 
@@ -46,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let settings = AppSettings.shared
+        StatusMenu.shared.install()
         Coordinator.shared.start()
         Hotkey.shared.action = { ChatController.shared.open() }
         settings.$hotkey.sink { Hotkey.shared.register($0) }.store(in: &bag)
@@ -78,9 +74,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
             w.toolbarStyle = .unified
             w.isReleasedWhenClosed = false
-            w.center()
+            w.setContentSize(NSSize(width: 760, height: 540))
             settingsWindow = w
         }
+        // Centered on the screen with the mouse (where the menu bar icon was clicked), unless already open.
+        if let w = settingsWindow, !w.isVisible { center(w) }
         present(settingsWindow!)
     }
 
@@ -102,13 +100,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.titleVisibility = .hidden
             w.isMovableByWindowBackground = true
             w.isReleasedWhenClosed = false
-            w.center()
+            w.setContentSize(NSSize(width: 600, height: 500))
             onboardingWindow = w
         }
+        if let w = onboardingWindow, !w.isVisible { center(w) }
         present(onboardingWindow!)
     }
 
+    private func center(_ w: NSWindow) {
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+        guard let vis = screen?.visibleFrame else { w.center(); return }
+        let size = w.frame.size
+        // A little above the middle, like system windows.
+        w.setFrameOrigin(CGPoint(x: vis.midX - size.width / 2, y: vis.midY - size.height / 2 + vis.height * 0.08))
+    }
+
     private func present(_ w: NSWindow) {
+        StatusMenu.shared.close()
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
         w.orderFrontRegardless()

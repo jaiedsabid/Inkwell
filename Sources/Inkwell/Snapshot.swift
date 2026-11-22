@@ -47,6 +47,7 @@ enum Snapshot {
         let (savedEnabled, savedPause) = (st.enabled, st.pausedUntil)
         Coordinator.shared.previewFrontApp(NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first
                                            ?? NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first, host: "docs.google.com")
+        render(MenuRoot(onSize: { _ in }).padding(20).background(Color(nsColor: .systemTeal).opacity(0.4)), "menu-panel", url)
         render(MenuContent().background(Color(nsColor: .windowBackgroundColor)), "menu", url)
         render(MenuContent().background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .light), "menu-light", url)
         st.pausedUntil = Date().addingTimeInterval(3600)

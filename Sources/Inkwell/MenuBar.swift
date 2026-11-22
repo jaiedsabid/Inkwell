@@ -323,7 +323,7 @@ struct MenuContent: View {
         }
     }
 
-    private func closeMenu() { NSApp.keyWindow?.close() }
+    private func closeMenu() { StatusMenu.shared.close() }
 }
 
 // MARK: - Building blocks
@@ -406,7 +406,7 @@ struct ToneMenu: View {
                 }
             }
             Divider()
-            Button { NSApp.keyWindow?.close(); AppDelegate.shared?.showNewTone() } label: { Label("New tone…", systemImage: "plus") }
+            Button { StatusMenu.shared.close(); AppDelegate.shared?.showNewTone() } label: { Label("New tone…", systemImage: "plus") }
         } label: {
             if let t = selection { MenuLabel(text: t.label, symbol: t.symbol) } else { MenuLabel(text: defaultLabel ?? "Natural") }
         }
