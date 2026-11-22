@@ -10,23 +10,28 @@ enum Snapshot {
 
         let card = CardModel()
         card.issues = [
-            Issue(range: NSRange(location: 0, length: 3), kind: .grammar, original: "has", replacement: "have", explanation: "Use 'have' with 'I'."),
-            Issue(range: NSRange(location: 4, length: 5), kind: .spelling, original: "recieve", replacement: "receive", explanation: ""),
+            Issue(range: NSRange(location: 2, length: 3), kind: .grammar, original: "has", replacement: "have", explanation: "Use 'have' with 'I'."),
+            Issue(range: NSRange(location: 20, length: 7), kind: .spelling, original: "recieve", replacement: "receive", explanation: ""),
         ]
         let sentence = CardModel()
-        sentence.issues = [Issue(range: NSRange(location: 0, length: 40), kind: .clarity, original: "The thing that we did was to finish it.",
-                                 replacement: "We finished it.", explanation: "Shorter and more direct.")]
+        sentence.issues = [Issue(range: NSRange(location: 0, length: 40), kind: .clarity, original: "The meeting that we had yesterday was a meeting where many things were discussed.",
+                                 replacement: "In yesterday's meeting we discussed many things.", explanation: "Shorter and more direct.")]
         let chat = ChatModel()
         chat.source = "hey can u send me the report by tmrw, its kind of urgent because the client keep asking about it"
         chat.turns = [ChatModel.Turn(prompt: "make it professional", result: "Could you please send me the report by tomorrow? It's fairly urgent, as the client keeps asking about it."),
                       ChatModel.Turn(prompt: "shorter")]
 
+        card.issues = card.issues.map { Checker.addContext($0, in: "I has a apple and I recieve mail daily." as NSString) }
         render(SuggestionCardView(model: card, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-word", url)
         render(SuggestionCardView(model: sentence, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-sentence", url)
+        let light = CardModel()
+        light.issues = [Issue(range: NSRange(location: 0, length: 10), kind: .clarity, original: "We will be able to start the work on the project next week.",
+                              replacement: "We can start the project next week.", explanation: "Shorter, same meaning.")]
+        render(SuggestionCardView(model: light, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-sentence-light", url)
         render(ChatView(model: chat, accept: {}, close: {}), "chat", url)
         render(ToneEditor(draft: CustomTone(name: "Warm but brief", guidance: "Warm but brief.", symbol: "heart")).background(Color(nsColor: .windowBackgroundColor)), "tone-editor", url)
         let punct = CardModel()
-        punct.issues = [Issue(range: NSRange(location: 0, length: 4), kind: .punctuation, original: "soon", replacement: "soon.", explanation: "End the sentence with a full stop.")]
+        punct.issues = [Checker.addContext(Issue(range: NSRange(location: 21, length: 4), kind: .punctuation, original: "soon", replacement: "soon.", explanation: "End the sentence with a full stop."), in: "We should meet again soon" as NSString)]
         render(SuggestionCardView(model: punct, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-punctuation", url)
 
         // The real hover-card panel, opened the way hovering opens it.

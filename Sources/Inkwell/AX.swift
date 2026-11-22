@@ -173,6 +173,21 @@ enum AX {
         return NSRange(location: r.location, length: r.length)
     }
 
+    /// Title of the window the element is in (an email subject, a Slack channel, a document name…).
+    static func windowTitle(_ el: AXUIElement) -> String? {
+        if let w = element(el, kAXWindowAttribute), let t = string(w, kAXTitleAttribute), !t.isEmpty { return t }
+        guard let pid = pid(el), let w = element(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute) else { return nil }
+        return string(w, kAXTitleAttribute)
+    }
+
+    /// What the field is for: its placeholder, label or description.
+    static func fieldLabel(_ el: AXUIElement) -> String? {
+        for name in [kAXPlaceholderValueAttribute, kAXDescriptionAttribute, kAXTitleAttribute] {
+            if let s = string(el, name), !s.isEmpty, s.count < 80 { return s }
+        }
+        return nil
+    }
+
     /// Address of the web page the element is on (browsers expose it on the AXWebArea).
     static func pageURL(_ el: AXUIElement) -> URL? {
         var cur: AXUIElement? = el

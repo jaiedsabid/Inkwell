@@ -185,7 +185,9 @@ enum CheckPrompt {
         - "explanation" is one short, plain sentence (at most 12 words) saying why, for example "Use 'its' for possession, not 'it's'."
         - Wanted tone: \(o.tone.label). \(o.tone.guidance)
         - How strict: \(o.strictness.guidance)
-        - Don't flag names, brands, product terms, URLs, code, emoji, or slang that suits the tone.\(o.dictionary.isEmpty ? "" : "\n- Never flag these words from the user's dictionary: " + o.dictionary.prefix(200).joined(separator: ", ") + ".")
+        - Don't flag names, brands, product terms, URLs, code, emoji, or slang that suits the tone.
+        - Never suggest swapping a correct word for a synonym, and never change the meaning, facts, names or numbers.
+        - Only suggest a clarity rewrite when it is clearly easier to read, shorter or more natural. Keep the writer's words where they work.\(o.dictionary.isEmpty ? "" : "\n- Never flag these words from the user's dictionary: " + o.dictionary.prefix(200).joined(separator: ", ") + ".")
         - Write replacements in the same language as the sentence.
         - Leave out sentences that have nothing to fix. An empty list is a fine answer.
         """
@@ -220,6 +222,19 @@ enum CheckPrompt {
             guard original != replacement, let r = TextTools.locate(original, in: text) else { continue }
             let explanation = item.explanation.trimmingCharacters(in: .whitespacesAndNewlines)
             let found = (text as NSString).substring(with: r)
+            if kind.isSentenceLevel {
+                let chunks = WordDiff.changes(from: found, to: replacement)
+                if chunks.isEmpty { continue }
+                // One word swapped for another: a different form of the same word ("are" → "is") is a grammar fix;
+                // anything else ("help" → "assistance") is a synonym swap, not an improvement.
+                if chunks.count == 1, let c = chunks.first, WordDiff.words(c.original).count == 1, WordDiff.words(c.replacement).count == 1,
+                   c.original.lowercased() != c.replacement.lowercased(), WordDiff.isWord(c.original), WordDiff.isWord(c.replacement) {
+                    guard WordDiff.sameRoot(c.original, c.replacement) else { continue }
+                    out[item.sentence, default: []].append(LocalIssue(location: r.location + c.range.location, length: c.range.length, kind: .grammar,
+                                                                      original: c.original, replacement: c.replacement, explanation: explanation))
+                    continue
+                }
+            }
             if kind.isSentenceLevel || WordDiff.words(found).count <= 4 {
                 out[item.sentence, default: []].append(LocalIssue(location: r.location, length: r.length, kind: kind,
                                                                   original: found, replacement: replacement, explanation: explanation))
@@ -272,6 +287,63 @@ enum WordDiff {
             if i > start { out.append((ns.substring(with: NSRange(location: start, length: i - start)), NSRange(location: start, length: i - start))) }
         }
         return out
+    }
+
+    static func isWord(_ w: String) -> Bool {
+        let core = w.trimmingCharacters(in: .punctuationCharacters)
+        guard !core.isEmpty else { return false }
+        return NSSpellChecker.shared.checkSpelling(of: core, startingAt: 0).location == NSNotFound
+    }
+
+    /// Same dictionary root ("are"/"is" → be, "has"/"have" → have), or an article swap (a/an/the).
+    static func sameRoot(_ a: String, _ b: String) -> Bool {
+        let x = a.lowercased().trimmingCharacters(in: .punctuationCharacters), y = b.lowercased().trimmingCharacters(in: .punctuationCharacters)
+        let groups: [Set<String>] = [
+            ["a", "an", "the"], ["am", "is", "are", "was", "were", "be", "been", "being"], ["has", "have", "had", "having"],
+            ["do", "does", "did", "done"], ["its", "it's"], ["your", "you're"], ["there", "their", "they're"], ["then", "than"],
+            ["to", "too"], ["whose", "who's"], ["affect", "effect"], ["lose", "loose"], ["this", "these"], ["that", "those"],
+            ["much", "many"], ["less", "fewer"], ["who", "whom"], ["me", "i"], ["good", "well"], ["fell", "felt"],
+        ]
+        if groups.contains(where: { $0.contains(x) && $0.contains(y) }) { return true }
+        if x.count > 3, y.count > 3, x.prefix(3) == y.prefix(3), abs(x.count - y.count) <= 3 { return true }   // go/goes, write/writes
+        func lemma(_ w: String) -> String {
+            let tagger = NLTagger(tagSchemes: [.lemma])
+            tagger.string = w
+            return tagger.tag(at: w.startIndex, unit: .word, scheme: .lemma).0?.rawValue.lowercased() ?? w
+        }
+        return lemma(x) == lemma(y)
+    }
+
+    enum SegmentKind { case same, removed, added }
+
+    /// The whole change as runs of kept, removed and added words (for showing a rewrite).
+    static func segments(from original: String, to replacement: String) -> [(kind: SegmentKind, text: String)] {
+        let a = words(original).map(\.word), b = words(replacement).map(\.word)
+        let n = a.count, m = b.count
+        guard n * m < 40_000 else { return [(.removed, original), (.added, replacement)] }
+        var dp = Array(repeating: Array(repeating: 0, count: m + 1), count: n + 1)
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            for j in stride(from: m - 1, through: 0, by: -1) {
+                dp[i][j] = a[i] == b[j] ? dp[i + 1][j + 1] + 1 : max(dp[i + 1][j], dp[i][j + 1])
+            }
+        }
+        var out: [(SegmentKind, String)] = []
+        func push(_ k: SegmentKind, _ w: String) {
+            if let last = out.last, last.0 == k { out[out.count - 1].1 += " " + w } else { out.append((k, w)) }
+        }
+        var i = 0, j = 0
+        while i < n || j < m {
+            if i < n, j < m, a[i] == b[j] { push(.same, a[i]); i += 1; j += 1 }
+            else if j < m && (i >= n || dp[i][j + 1] >= dp[i + 1][j]) { push(.added, b[j]); j += 1 }
+            else { push(.removed, a[i]); i += 1 }
+        }
+        // Show removals before additions where they sit side by side.
+        var k = 0
+        while k + 1 < out.count {
+            if out[k].0 == .added, out[k + 1].0 == .removed { out.swapAt(k, k + 1) }
+            k += 1
+        }
+        return out.map { (kind: $0.0, text: $0.1) }
     }
 
     static func changes(from original: String, to replacement: String) -> [Change] {
@@ -441,7 +513,24 @@ final class Checker: ObservableObject {
         let merged = (ai + local)
             .filter { !dismissed.contains($0.dismissKey) && !s.ignoredSuggestions.contains($0.dismissKey) && !s.disabledKinds.contains($0.kind) }
             .sorted { $0.range.location < $1.range.location }
-        if merged != issues { issues = merged }
+        let withContext = merged.map { Self.addContext($0, in: text as NSString) }
+        if withContext != issues { issues = withContext }
+    }
+
+    /// Up to ~6 words on each side of the issue, within its line.
+    static func addContext(_ issue: Issue, in text: NSString) -> Issue {
+        var i = issue
+        guard NSMaxRange(issue.range) <= text.length else { return i }
+        let lineRange = text.lineRange(for: issue.range)
+        let beforeRange = NSRange(location: lineRange.location, length: issue.range.location - lineRange.location)
+        let afterStart = NSMaxRange(issue.range)
+        let afterRange = NSRange(location: afterStart, length: max(0, NSMaxRange(lineRange) - afterStart))
+        let beforeWords = text.substring(with: beforeRange).split(separator: " ", omittingEmptySubsequences: false)
+        let afterText = text.substring(with: afterRange).trimmingCharacters(in: .newlines)
+        let afterWords = afterText.split(separator: " ", omittingEmptySubsequences: false)
+        i.before = (beforeWords.count > 6 ? "…" : "") + beforeWords.suffix(6).joined(separator: " ")
+        i.after = afterWords.prefix(6).joined(separator: " ") + (afterWords.count > 6 ? "…" : "")
+        return i
     }
 
     /// Don't flag the word the cursor is still in.

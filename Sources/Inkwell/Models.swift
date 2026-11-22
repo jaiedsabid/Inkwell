@@ -196,6 +196,9 @@ struct Issue: Identifiable, Equatable {
     var original: String
     var replacement: String
     var explanation: String
+    /// A few words of the text around the issue, for showing the change in context.
+    var before = ""
+    var after = ""
 
     var id: String { "\(range.location):\(range.length):\(kind.rawValue):\(replacement)" }
 

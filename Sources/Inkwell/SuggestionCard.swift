@@ -107,19 +107,12 @@ struct SuggestionCardView: View {
                     }
                 }
 
-                if issue.kind.isSentenceLevel {
-                    Text(issue.replacement)
-                        .font(.body)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(issue.original).strikethrough().foregroundStyle(.secondary)
-                        Image(systemName: "arrow.right").font(.caption).foregroundStyle(.tertiary)
-                        Text(issue.replacement).fontWeight(.semibold)
-                    }
-                    .font(.body)
-                }
+                // The change, shown where it happens: removed words struck through, new words highlighted.
+                Text(SuggestionText.make(issue))
+                    .font(.system(size: 13.5))
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 if settings.showExplanations, !issue.explanation.isEmpty {
                     Text(issue.explanation)
@@ -160,7 +153,7 @@ struct SuggestionCardView: View {
             }
         }
         .padding(14)
-        .frame(width: 320, alignment: .leading)
+        .frame(width: (model.current?.kind.isSentenceLevel ?? false) ? 360 : 320, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.08)))
     }
@@ -261,4 +254,60 @@ final class Toast {
     }
 
     func hide() { work?.cancel(); panel.orderOut(nil) }
+}
+
+/// Builds the styled text for a suggestion card.
+enum SuggestionText {
+    static func make(_ issue: Issue) -> AttributedString {
+        var out = AttributedString()
+        func add(_ s: String, _ style: Style) {
+            guard !s.isEmpty else { return }
+            var a = AttributedString(s)
+            switch style {
+            case .context:
+                a.foregroundColor = .secondary
+            case .kept:
+                a.foregroundColor = .primary
+            case .removed:
+                a.foregroundColor = Color(nsColor: Theme.red).opacity(0.85)
+                a.strikethroughStyle = .single
+            case .added:
+                a.foregroundColor = Theme.accent
+                a.font = .system(size: 13.5, weight: .semibold)
+                a.backgroundColor = Theme.accent.opacity(0.16)
+            case .plain:
+                a.foregroundColor = .primary
+            }
+            out += a
+        }
+
+        if issue.kind.isSentenceLevel {
+            let segs = WordDiff.segments(from: issue.original, to: issue.replacement)
+            let kept = segs.filter { $0.kind == .same }.reduce(0) { $0 + WordDiff.words($1.text).count }
+            // Mostly rewritten: a word-by-word diff would be noise, so just show the new sentence.
+            if Double(kept) < Double(max(WordDiff.words(issue.original).count, 1)) * 0.5 {
+                add(issue.replacement, .plain)
+                return out
+            }
+            for seg in segs {
+                if !out.characters.isEmpty { add(" ", .kept) }
+                add(seg.text, seg.kind == .same ? .kept : seg.kind == .removed ? .removed : .added)
+            }
+            return out
+        }
+
+        add(issue.before, .context)
+        let o = issue.original, r = issue.replacement
+        if r.hasPrefix(o) {                       // something added after: "soon" → "soon."
+            add(o, .kept); add(String(r.dropFirst(o.count)), .added)
+        } else if r.hasSuffix(o) {                // something added before
+            add(String(r.dropLast(o.count)), .added); add(o, .kept)
+        } else {
+            add(o, .removed); add(" ", .kept); add(r, .added)
+        }
+        add(issue.after, .context)
+        return out
+    }
+
+    enum Style { case context, kept, removed, added, plain }
 }

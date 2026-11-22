@@ -43,7 +43,7 @@ enum SelfTest {
         check(parsed != nil, "parses reply with extra text around JSON")
         check(parsed?[1]?.count == 2, "keeps 2 issues for sentence 1")
         check(parsed?[1]?.first?.location == 2, "issue located at right offset")
-        check(parsed?[2]?.count == 1, "drops unlocatable issue")
+        check(parsed?[2]?.count == 1 && parsed?[2]?.first?.kind == .grammar, "drops unlocatable issue; one-word form fix becomes grammar")
         check(parsed?[3]?.isEmpty == true, "clean sentence cached as empty")
         check(parsed?[9] == nil, "ignores unknown sentence id")
         check(CheckPrompt.parse("not json", sentences: [1: "x"]) == nil, "bad reply is nil")
@@ -111,6 +111,20 @@ enum SelfTest {
         check(Autocomplete.clean("   ", after: "Hello there", length: .phrase).isEmpty, "suggestion: blank reply is nothing")
         check(Autocomplete.firstWord(of: " quick brown") == " quick" && Autocomplete.firstWord(of: "s, then") == "s,", "suggestion: first word")
         check(Autocomplete.worthSuggesting("Hello, I am writing") && !Autocomplete.worthSuggesting("Hi") && !Autocomplete.worthSuggesting("Some text here\n"), "suggestion: when to suggest")
+        check(!Autocomplete.worthSuggesting("That went well. ") && !Autocomplete.worthSuggesting("That went well. We"), "suggestion: not at a new sentence")
+        check(Autocomplete.worthSuggesting("That went well. We should") && Autocomplete.worthSuggesting("Thanks for the upd"), "suggestion: mid-sentence and mid-word")
+        check(Autocomplete.pick(#"{"completion":" questions.","confidence":5}"#, after: "Let me know if you have any", length: .phrase) == " questions.", "suggestion: confident reply kept")
+        check(Autocomplete.pick(#"{"completion":" the report","confidence":2}"#, after: "Please send me", length: .phrase).isEmpty, "suggestion: unsure reply dropped")
+        check(Autocomplete.pick(#"{"completion":" review of the document.","confidence":4}"#, after: "Thanks for your help with the", length: .phrase).isEmpty
+              && Autocomplete.pick(#"{"completion":" hearing from you.","confidence":4}"#, after: "Looking forward to", length: .phrase) == " hearing from you.", "suggestion: long guesses need high confidence")
+        check(!Autocomplete.isGrounded(" on March 14", in: "Let's meet") && !Autocomplete.isGrounded(" with Sarah", in: "I spoke"), "suggestion: invented dates and names dropped")
+        check(Autocomplete.isGrounded(" with Sarah tomorrow", in: "Sarah said she'd call. I'll meet") && Autocomplete.isGrounded(" questions.", in: "Any"), "suggestion: grounded text kept")
+        // Card text
+        let ci = Checker.addContext(Issue(range: NSRange(location: 2, length: 3), kind: .grammar, original: "has", replacement: "have", explanation: ""), in: "I has a apple and it are red." as NSString)
+        check(ci.before == "I " && ci.after.hasPrefix(" a apple"), "card: words around the issue")
+        let segs = WordDiff.segments(from: "The meeting that we had was long.", to: "Our meeting was long.")
+        check(segs.first?.kind == .removed && segs.contains { $0.kind == .added && $0.text == "Our" } && segs.last?.text == "was long.", "card: rewrite diff")
+        check(CheckPrompt.parse(#"{"issues":[{"sentence":1,"kind":"clarity","original":"Thanks for your help.","replacement":"Thanks for your assistance.","explanation":"x"}]}"#, sentences: [1: "Thanks for your help."])?[1]?.isEmpty == true, "synonym swap dropped")
 
         // Custom tones
         let old = try? JSONDecoder().decode(Tone.self, from: Data("\"professional\"".utf8))
@@ -214,11 +228,16 @@ enum SelfTest {
                                                  messages: ChatPrompt.messages(source: "hey can u send me the report by tmrw its urgent", turns: [.init(prompt: "make it professional")]),
                                                  jsonSchema: nil, purpose: .chat)
             print(String(format: "Rewrite %.1fs: %@", Date().timeIntervalSince(t), ChatPrompt.clean(chat)))
-            for before in ["Thanks so much for your help with the", "I'm writing to let you know that the meeting", "Could you please send me"] {
+            let samples = ["Thanks so much for your help with the", "I'm writing to let you know that the meeting", "Could you please send me",
+                           "Let me know if you have any", "Hope you're doing", "The results of the experiment suggest that", "Sorry for the late"]
+            for before in samples {
                 t = Date()
-                let raw = try await client.complete(system: Autocomplete.prompt(length: .phrase, tone: .natural, language: "English (US)"),
-                                                    messages: [.init(role: .user, text: before)], jsonSchema: nil, purpose: .complete)
-                print(String(format: "Suggest %.1fs: %@[%@]", Date().timeIntervalSince(t), before, Autocomplete.clean(raw, after: before, length: .phrase)))
+                let ctx = Autocomplete.Context(app: "Mail", window: "Re: Project update", field: "Message body")
+                let raw = try await client.complete(system: Autocomplete.prompt(length: .phrase, tone: .natural, language: "English (US)", context: ctx),
+                                                    messages: [.init(role: .user, text: "Text before the cursor:\n<<<\n\(before)\n>>>")],
+                                                    jsonSchema: Autocomplete.schema, purpose: .complete)
+                let picked = Autocomplete.pick(raw, after: before, length: .phrase)
+                print(String(format: "Suggest %.1fs: %@[%@]  (raw %@)", Date().timeIntervalSince(t), before, picked, raw.replacingOccurrences(of: "\n", with: " ")))
             }
             return true
         } catch {
