@@ -170,12 +170,95 @@ enum CheckPrompt {
             guard let text = sentences[item.sentence], let kind = IssueKind(rawValue: item.kind) else { continue }
             let original = item.original, replacement = item.replacement
             guard original != replacement, let r = TextTools.locate(original, in: text) else { continue }
-            out[item.sentence, default: []].append(LocalIssue(
-                location: r.location, length: r.length, kind: kind,
-                original: (text as NSString).substring(with: r), replacement: replacement,
-                explanation: item.explanation.trimmingCharacters(in: .whitespacesAndNewlines)))
+            let explanation = item.explanation.trimmingCharacters(in: .whitespacesAndNewlines)
+            let found = (text as NSString).substring(with: r)
+            if kind.isSentenceLevel || WordDiff.words(found).count <= 4 {
+                out[item.sentence, default: []].append(LocalIssue(location: r.location, length: r.length, kind: kind,
+                                                                  original: found, replacement: replacement, explanation: explanation))
+                continue
+            }
+            // A "small" fix that spans a long stretch (some models send the whole sentence): split it into the words
+            // that actually changed, or treat it as a sentence rewrite when too much changed.
+            let chunks = WordDiff.changes(from: found, to: replacement)
+            if !chunks.isEmpty, chunks.count <= 4, chunks.allSatisfy({ WordDiff.words($0.original).count <= 3 && WordDiff.words($0.replacement).count <= 3 }) {
+                for c in chunks {
+                    out[item.sentence, default: []].append(LocalIssue(location: r.location + c.range.location, length: c.range.length, kind: kind,
+                                                                      original: c.original, replacement: c.replacement,
+                                                                      explanation: chunks.count == 1 ? explanation : ""))
+                }
+            } else if !chunks.isEmpty {
+                out[item.sentence, default: []].append(LocalIssue(location: r.location, length: r.length, kind: .clarity,
+                                                                  original: found, replacement: replacement, explanation: explanation))
+            }
+        }
+        // Don't stack two sentence-level suggestions on one sentence.
+        for (id, list) in out {
+            var seenSentenceLevel = false
+            out[id] = list.filter { i in
+                guard i.kind.isSentenceLevel else { return true }
+                defer { seenSentenceLevel = true }
+                return !seenSentenceLevel
+            }
         }
         return out
+    }
+}
+
+/// Word-level diff, used to turn a rewritten span into the few words that changed.
+enum WordDiff {
+    struct Change: Equatable {
+        var range: NSRange      // in the original text (UTF-16)
+        var original: String
+        var replacement: String
+    }
+
+    /// Words with their UTF-16 ranges (split on whitespace; punctuation stays attached).
+    static func words(_ text: String) -> [(word: String, range: NSRange)] {
+        let ns = text as NSString
+        var out: [(String, NSRange)] = []
+        var i = 0
+        while i < ns.length {
+            while i < ns.length, CharacterSet.whitespacesAndNewlines.contains(UnicodeScalar(ns.character(at: i)) ?? " ") { i += 1 }
+            let start = i
+            while i < ns.length, !CharacterSet.whitespacesAndNewlines.contains(UnicodeScalar(ns.character(at: i)) ?? " ") { i += 1 }
+            if i > start { out.append((ns.substring(with: NSRange(location: start, length: i - start)), NSRange(location: start, length: i - start))) }
+        }
+        return out
+    }
+
+    static func changes(from original: String, to replacement: String) -> [Change] {
+        let a = words(original), b = words(replacement).map(\.word)
+        let n = a.count, m = b.count
+        guard n > 0, n * m < 40_000 else { return [] }
+        // LCS table
+        var dp = Array(repeating: Array(repeating: 0, count: m + 1), count: n + 1)
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            for j in stride(from: m - 1, through: 0, by: -1) {
+                dp[i][j] = a[i].word == b[j] ? dp[i + 1][j + 1] + 1 : max(dp[i + 1][j], dp[i][j + 1])
+            }
+        }
+        var out: [Change] = []
+        var i = 0, j = 0
+        while i < n || j < m {
+            if i < n, j < m, a[i].word == b[j] { i += 1; j += 1; continue }
+            let si = i, sj = j
+            while (i < n || j < m) && !(i < n && j < m && a[i].word == b[j]) {
+                if j < m && (i >= n || dp[i][j + 1] >= dp[i + 1][j]) { j += 1 } else { i += 1 }
+            }
+            let added = b[sj..<j].joined(separator: " ")
+            if i > si {
+                let r = NSUnionRange(a[si].range, a[i - 1].range)
+                out.append(Change(range: r, original: (original as NSString).substring(with: r), replacement: added))
+            } else if si > 0 {
+                // Pure insertion: attach it to the word before.
+                let prev = a[si - 1]
+                out.append(Change(range: prev.range, original: prev.word, replacement: prev.word + " " + added))
+            } else {
+                let first = a[0]
+                out.append(Change(range: first.range, original: first.word, replacement: added + " " + first.word))
+            }
+        }
+        return out.filter { $0.original != $0.replacement }
     }
 }
 
@@ -322,7 +405,8 @@ final class Checker: ObservableObject {
         if let c = cursor {
             pending.sort { abs($0.range.location - c) < abs($1.range.location - c) }
         }
-        pending = Array(pending.prefix(20))
+        // The on-device model is much slower: small batches, nearest sentences first.
+        pending = Array(pending.prefix(AppSettings.shared.engine == .onDevice ? 4 : 20))
 
         let client: LLMClient
         do { client = try AI.client() } catch {
@@ -346,7 +430,10 @@ final class Checker: ObservableObject {
                 let raw = try await client.complete(system: system, messages: [.init(role: .user, text: user)],
                                                     jsonSchema: CheckPrompt.schema, purpose: .check)
                 result = CheckPrompt.parse(raw, sentences: byID)
-                if result == nil { failure = AIError.badResponse.localizedDescription }
+                if result == nil {
+                    failure = AIError.badResponse.localizedDescription
+                    Log.write("unreadable AI reply (\(raw.count) chars, starts \(raw.prefix(1) == "{" ? "with {" : "without {"))", key: "ai")
+                }
             } catch {
                 failure = error.localizedDescription
             }

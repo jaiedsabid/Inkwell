@@ -160,8 +160,35 @@ struct OnDeviceClient: LLMClient {
             prompt += "User: "
         }
         prompt += messages.last?.text ?? ""
+        if let jsonSchema {
+            // Guided generation: the framework makes the model produce exactly this shape.
+            let schema = try GenerationSchema(root: Self.dynamic(jsonSchema, name: "Result"), dependencies: [])
+            let response = try await session.respond(to: prompt, schema: schema)
+            return response.content.jsonString
+        }
         let response = try await session.respond(to: prompt)
         return response.content
+    }
+
+    /// Converts the small JSON Schema subset Inkwell uses (object, array, string with enum, integer) to a runtime schema.
+    static func dynamic(_ s: [String: Any], name: String) -> DynamicGenerationSchema {
+        switch s["type"] as? String {
+        case "object":
+            let props = s["properties"] as? [String: Any] ?? [:]
+            let required = Set(s["required"] as? [String] ?? [])
+            let list = props.keys.sorted().map { key in
+                DynamicGenerationSchema.Property(name: key, schema: dynamic(props[key] as? [String: Any] ?? [:], name: name + "_" + key),
+                                                 isOptional: !required.contains(key))
+            }
+            return DynamicGenerationSchema(name: name, properties: list)
+        case "array":
+            return DynamicGenerationSchema(arrayOf: dynamic(s["items"] as? [String: Any] ?? [:], name: name + "Item"))
+        case "integer":
+            return DynamicGenerationSchema(type: Int.self)
+        default:
+            if let options = s["enum"] as? [String] { return DynamicGenerationSchema(name: name, anyOf: options) }
+            return DynamicGenerationSchema(type: String.self)
+        }
     }
 }
 #endif

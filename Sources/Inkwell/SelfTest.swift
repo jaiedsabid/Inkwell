@@ -79,6 +79,14 @@ enum SelfTest {
         check(!sp2.contains { $0.original == "teh" }, "dictionary words are not flagged")
         check(TextTools.isSkippable("API") && TextTools.isSkippable("user@x.com") && !TextTools.isSkippable("hello"), "skips acronyms and addresses")
 
+        // Word diff: whole-sentence "grammar" fixes become word fixes, big rewrites become clarity
+        let ch = WordDiff.changes(from: "I has a apple and it are red.", to: "I have an apple and it is red.")
+        check(ch.map(\.original) == ["has a", "are"] && ch.map(\.replacement) == ["have an", "is"], "word diff finds changed words (got \(ch.map(\.original)))")
+        let split = CheckPrompt.parse(#"{"issues":[{"sentence":1,"kind":"grammar","original":"I has a apple and it are red.","replacement":"I have an apple and it is red.","explanation":"x"}]}"#, sentences: [1: "I has a apple and it are red."])
+        check(split?[1]?.count == 2 && split?[1]?.first?.original == "has a" && split?[1]?.first?.location == 2, "long grammar fix is split into word fixes")
+        let big = CheckPrompt.parse(#"{"issues":[{"sentence":1,"kind":"grammar","original":"The meeting that we had was a meeting where things were discussed by us.","replacement":"We discussed several things in the meeting.","explanation":"x"}]}"#, sentences: [1: "The meeting that we had was a meeting where things were discussed by us."])
+        check(big?[1]?.count == 1 && big?[1]?.first?.kind == .clarity, "big rewrite becomes a clarity suggestion")
+
         // Phase 3: tone check prompt, stats
         let sys3 = CheckPrompt.system(.init(languageName: "English (US)", tone: .friendly, strictness: .standard, toneCheck: true))
         check(sys3.contains("\"tone\": the sentence doesn't fit") && !sys3.contains("Never use the kind"), "tone check adds the tone kind")
@@ -103,5 +111,27 @@ enum SelfTest {
 
         print(failures == 0 ? "All passed" : "\(failures) failed")
         return failures == 0
+    }
+
+    /// `Inkwell --aitest`: runs one real check with the configured engine and prints what comes back.
+    static func aiTest() async -> Bool {
+        let sentences = [1: "I has a apple and it are red.", 2: "The meeting that we had was a meeting where things were discussed by us.", 3: "Thanks for your help."]
+        print("Engine: \(AppSettings.shared.engine.rawValue)")
+        do {
+            let client = try AI.client()
+            let opts = CheckPrompt.Options(languageName: "English (US)", tone: .professional, strictness: .standard, toneCheck: true)
+            let start = Date()
+            let raw = try await client.complete(system: CheckPrompt.system(opts), messages: [.init(role: .user, text: CheckPrompt.user(sentences.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }))],
+                                                jsonSchema: CheckPrompt.schema, purpose: .check)
+            print(String(format: "Reply in %.1fs", Date().timeIntervalSince(start)))
+            guard let parsed = CheckPrompt.parse(raw, sentences: sentences) else { print("Unreadable reply:\n\(raw)"); return false }
+            for (id, list) in parsed.sorted(by: { $0.key < $1.key }) {
+                for i in list { print("  [\(id)] \(i.kind.rawValue): \"\(i.original)\" → \"\(i.replacement)\" (\(i.explanation))") }
+            }
+            return true
+        } catch {
+            print("Failed: \(error.localizedDescription)")
+            return false
+        }
     }
 }

@@ -172,8 +172,11 @@ struct ChatView: View {
             Text(model.isWriteMode ? "Write with Inkwell" : "Improve with Inkwell").font(.headline)
             Spacer()
             Menu {
-                Picker("Tone", selection: $settings.tone) {
-                    ForEach(Tone.allCases) { Label($0.label, systemImage: $0.symbol).tag($0) }
+                // Tones listed directly in the menu (one click), current one checked.
+                ForEach(Tone.allCases) { tone in
+                    Button { settings.tone = tone } label: {
+                        Label(tone.label, systemImage: tone == settings.tone ? "checkmark" : tone.symbol)
+                    }
                 }
             } label: {
                 Label(settings.tone.label, systemImage: settings.tone.symbol).font(.caption)
