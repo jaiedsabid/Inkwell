@@ -66,6 +66,52 @@ enum TextTools {
         return issues
     }
 
+    private static let abbreviations: Set<String> = ["e.g.", "i.e.", "etc.", "vs.", "mr.", "mrs.", "ms.", "dr.", "st.", "no.", "approx.", "inc.", "ltd."]
+
+    private static let questionStarts: Set<String> = ["what", "why", "how", "when", "where", "who", "whom", "whose", "which",
+        "can", "could", "would", "will", "should", "shall", "do", "does", "did", "is", "are", "am", "was", "were", "have", "has", "may"]
+
+    /// Local punctuation rules the AI tends to skip: a missing full stop / question mark at the end of a sentence and a
+    /// lowercase first letter. `skip` says whether a range is still being typed.
+    static func punctuation(_ sentences: [Sentence], skip: (NSRange) -> Bool) -> [Issue] {
+        var out: [Issue] = []
+        for s in sentences {
+            let words = WordDiff.words(s.text)
+            guard words.count >= 4, let first = words.first, let last = words.last else { continue }
+            // List items and quotes aren't held to sentence rules.
+            if let c = first.word.first, "-*•>#".contains(c) || (first.word.dropLast().allSatisfy(\.isNumber) && ".)".contains(first.word.last!)) { continue }
+
+            // End punctuation
+            if let end = last.word.last, end.isLetter || end.isNumber {
+                let range = NSRange(location: s.range.location + last.range.location, length: last.range.length)
+                if !skip(NSRange(location: range.location, length: range.length + 1)) {
+                    let question = questionStarts.contains(first.word.lowercased().trimmingCharacters(in: .punctuationCharacters))
+                    out.append(Issue(range: range, kind: .grammar, original: last.word, replacement: last.word + (question ? "?" : "."),
+                                     explanation: question ? "This is a question, so end it with a question mark." : "End the sentence with a full stop."))
+                }
+            }
+
+            // Capital letter at the start of each sentence, including ones the splitter missed ("done. we left").
+            // Only plain lowercase words, so "iPhone" or "eBay" are left alone.
+            for (k, word) in words.enumerated() {
+                if k > 0 {
+                    let prev = words[k - 1].word.lowercased()
+                    guard let end = prev.last, ".!?".contains(end), !abbreviations.contains(prev),
+                          !(prev.dropLast().contains(".")) else { continue }
+                }
+                let w = word.word
+                if let c = w.first, c.isLowercase, c.isLetter, w.dropFirst().allSatisfy({ !$0.isUppercase }), w.count > 1 || c == "i" {
+                    let range = NSRange(location: s.range.location + word.range.location, length: word.range.length)
+                    if !skip(range) {
+                        out.append(Issue(range: range, kind: .grammar, original: w, replacement: w.prefix(1).uppercased() + w.dropFirst(),
+                                         explanation: "Start a sentence with a capital letter."))
+                    }
+                }
+            }
+        }
+        return out
+    }
+
     /// Finds `needle` in `haystack` (exact first, then ignoring case). UTF-16 range.
     static func locate(_ needle: String, in haystack: String) -> NSRange? {
         guard !needle.isEmpty else { return nil }
@@ -118,6 +164,7 @@ enum CheckPrompt {
         Kinds:
         - "spelling": a misspelled word.
         - "grammar": a grammar, agreement, tense, article, word-form or punctuation mistake.
+          A missing full stop or question mark at the end of a sentence, and a sentence that doesn't start with a capital letter, are grammar issues too.
           For spelling and grammar, "original" is the shortest exact span that has to change (usually 1-3 words) and "replacement" is its fix.
         - "clarity": the whole sentence is awkward, confusing, wordy or could be clearly better. "original" is the entire sentence exactly as given and "replacement" is the improved sentence, with any spelling and grammar fixes included. At most one clarity issue per sentence.
         """
@@ -380,7 +427,16 @@ final class Checker: ObservableObject {
                 !wordLevelAI.contains { NSIntersectionRange($0.range, sp.range).length > 0 }
             }
             .filter { !isBeingTyped($0.range) }
-        let merged = (ai + spell)
+        var local = spell
+        if AppSettings.shared.strictness != .relaxed {
+            let taken = ai.filter { !$0.kind.isSentenceLevel } + spell
+            local += TextTools.punctuation(sentences, skip: { isBeingTyped($0) })
+                .filter { p in
+                    // The AI's or spell checker's fix for the same word comes first; this one shows once that's fixed.
+                    !taken.contains { NSIntersectionRange($0.range, p.range).length > 0 || $0.range.location == p.range.location }
+                }
+        }
+        let merged = (ai + local)
             .filter { !dismissed.contains($0.dismissKey) }
             .sorted { $0.range.location < $1.range.location }
         if merged != issues { issues = merged }

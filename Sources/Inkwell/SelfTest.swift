@@ -79,6 +79,17 @@ enum SelfTest {
         check(!sp2.contains { $0.original == "teh" }, "dictionary words are not flagged")
         check(TextTools.isSkippable("API") && TextTools.isSkippable("user@x.com") && !TextTools.isSkippable("hello"), "skips acronyms and addresses")
 
+        // Local punctuation rules
+        let pt = "can you send me the report by tomorrow\nThanks for the help today. we should meet again soon"
+        let pis = TextTools.punctuation(TextTools.sentences(pt), skip: { _ in false })
+        check(pis.contains { $0.original == "tomorrow" && $0.replacement == "tomorrow?" }, "question gets a question mark")
+        check(pis.contains { $0.original == "soon" && $0.replacement == "soon." }, "missing full stop is flagged")
+        check(pis.contains { $0.original == "can" && $0.replacement == "Can" } && pis.contains { $0.original == "we" && $0.replacement == "We" }, "lowercase sentence start is flagged")
+        check(!pis.contains { $0.original == "today." }, "finished sentence is left alone")
+        let listItems = TextTools.punctuation(TextTools.sentences("- buy milk and eggs today\n1. call the bank about it"), skip: { _ in false })
+        check(!listItems.contains { $0.replacement.hasSuffix(".") }, "list items don't need a full stop")
+        check(TextTools.punctuation(TextTools.sentences("I bought a new iPhone"), skip: { _ in false }).allSatisfy { $0.original != "iPhone" || $0.replacement == "iPhone." }, "brand casing untouched")
+
         // Word diff: whole-sentence "grammar" fixes become word fixes, big rewrites become clarity
         let ch = WordDiff.changes(from: "I has a apple and it are red.", to: "I have an apple and it is red.")
         check(ch.map(\.original) == ["has a", "are"] && ch.map(\.replacement) == ["have an", "is"], "word diff finds changed words (got \(ch.map(\.original)))")
