@@ -98,6 +98,22 @@ enum SelfTest {
         check(!listItems.contains { $0.replacement.hasSuffix(".") }, "list items don't need a full stop")
         check(TextTools.punctuation(TextTools.sentences("I bought a new iPhone"), skip: { _ in false }).allSatisfy { $0.original != "iPhone" || $0.replacement == "iPhone." }, "brand casing untouched")
 
+        check(pis.first { $0.original == "soon" }?.kind == .punctuation && pis.first { $0.original == "we" }?.kind == .capitalization, "punctuation and capitalization have their own type")
+        check(CheckPrompt.system(.init(languageName: "English", tone: .natural, strictness: .standard, toneCheck: false)).contains("\"punctuation\":"), "prompt explains punctuation type")
+
+        // Custom tones
+        let old = try? JSONDecoder().decode(Tone.self, from: Data("\"professional\"".utf8))
+        check(old == .professional && old?.label == "Professional", "tones saved before custom tones still load")
+        let savedCustom = ToneRegistry.custom
+        ToneRegistry.custom = [CustomTone(id: "custom-test", name: "Pirate", guidance: "Talk like a pirate.", symbol: "flame")]
+        let pirate = Tone(id: "custom-test")
+        check(pirate.label == "Pirate" && pirate.guidance == "Talk like a pirate." && Tone.allCases.contains(pirate), "custom tone resolves name and guidance")
+        check(CheckPrompt.system(.init(languageName: "English", tone: pirate, strictness: .standard, toneCheck: false)).contains("Pirate. Talk like a pirate."), "custom tone reaches the prompt")
+        check((try? JSONEncoder().encode(pirate)).map { String(decoding: $0, as: UTF8.self) } == "\"custom-test\"", "tone encodes as its id")
+        ToneRegistry.custom = []
+        check(!pirate.exists && pirate.label == "Natural", "deleted custom tone falls back to Natural")
+        ToneRegistry.custom = savedCustom
+
         // Word diff: whole-sentence "grammar" fixes become word fixes, big rewrites become clarity
         let ch = WordDiff.changes(from: "I has a apple and it are red.", to: "I have an apple and it is red.")
         check(ch.map(\.original) == ["has a", "are"] && ch.map(\.replacement) == ["have an", "is"], "word diff finds changed words (got \(ch.map(\.original)))")

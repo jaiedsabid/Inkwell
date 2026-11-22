@@ -115,7 +115,7 @@ final class OverlayCanvas: NSView {
             let path = NSBezierPath()
             path.lineCapStyle = .round
             switch s.kind {
-            case .spelling, .grammar:
+            case .spelling, .grammar, .punctuation, .capitalization:
                 // soft wavy line
                 path.lineWidth = 1.6
                 let wave: CGFloat = 1.6, step: CGFloat = 3

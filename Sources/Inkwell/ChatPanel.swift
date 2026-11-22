@@ -186,6 +186,8 @@ struct ChatView: View {
                         Label(tone.label, systemImage: tone == settings.tone ? "checkmark" : tone.symbol)
                     }
                 }
+                Divider()
+                Button { AppDelegate.shared?.showNewTone() } label: { Label("New tone…", systemImage: "plus") }
             } label: {
                 Label(settings.tone.label, systemImage: settings.tone.symbol).font(.caption)
             }

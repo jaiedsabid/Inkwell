@@ -24,6 +24,10 @@ enum Snapshot {
         render(SuggestionCardView(model: card, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-word", url)
         render(SuggestionCardView(model: sentence, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-sentence", url)
         render(ChatView(model: chat, accept: {}, close: {}), "chat", url)
+        render(ToneEditor(draft: CustomTone(name: "Warm but brief", guidance: "Warm but brief.", symbol: "heart")).background(Color(nsColor: .windowBackgroundColor)), "tone-editor", url)
+        let punct = CardModel()
+        punct.issues = [Issue(range: NSRange(location: 0, length: 4), kind: .punctuation, original: "soon", replacement: "soon.", explanation: "End the sentence with a full stop.")]
+        render(SuggestionCardView(model: punct, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-punctuation", url)
 
         // The real hover-card panel, opened the way hovering opens it.
         let ctl = SuggestionCardController()

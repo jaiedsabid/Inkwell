@@ -1,47 +1,89 @@
 import Foundation
 import SwiftUI
 
-/// How the user wants their writing to sound.
-enum Tone: String, CaseIterable, Codable, Identifiable {
-    case natural, casual, professional, friendly, confident, academic, concise
+/// How the user wants their writing to sound: one of the built-in tones or one the user made.
+/// Stored as its id string, so settings saved before custom tones existed still load.
+struct Tone: Hashable, Codable, Identifiable {
+    let id: String
 
-    var id: String { rawValue }
+    init(id: String) { self.id = id }
+    init(from decoder: Decoder) throws { id = try decoder.singleValueContainer().decode(String.self) }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(id)
+    }
+
+    static let natural = Tone(id: "natural")
+    static let casual = Tone(id: "casual")
+    static let professional = Tone(id: "professional")
+    static let friendly = Tone(id: "friendly")
+    static let confident = Tone(id: "confident")
+    static let academic = Tone(id: "academic")
+    static let concise = Tone(id: "concise")
+
+    static let builtIns: [Tone] = [.natural, .casual, .professional, .friendly, .confident, .academic, .concise]
+    /// Built-in tones followed by the user's own.
+    static var allCases: [Tone] { builtIns + ToneRegistry.custom.map { Tone(id: $0.id) } }
+
+    var custom: CustomTone? { ToneRegistry.custom.first { $0.id == id } }
+    var isCustom: Bool { id.hasPrefix("custom-") }
+    /// False for a custom tone that was deleted.
+    var exists: Bool { !isCustom || custom != nil }
 
     var label: String {
-        switch self {
-        case .natural: "Natural"
-        case .casual: "Casual"
-        case .professional: "Professional"
-        case .friendly: "Friendly"
-        case .confident: "Confident"
-        case .academic: "Academic"
-        case .concise: "Concise"
+        switch id {
+        case "natural": "Natural"
+        case "casual": "Casual"
+        case "professional": "Professional"
+        case "friendly": "Friendly"
+        case "confident": "Confident"
+        case "academic": "Academic"
+        case "concise": "Concise"
+        default: custom?.name ?? "Natural"
         }
     }
 
     var symbol: String {
-        switch self {
-        case .natural: "leaf"
-        case .casual: "cup.and.saucer"
-        case .professional: "briefcase"
-        case .friendly: "face.smiling"
-        case .confident: "bolt"
-        case .academic: "graduationcap"
-        case .concise: "scissors"
+        switch id {
+        case "natural": "leaf"
+        case "casual": "cup.and.saucer"
+        case "professional": "briefcase"
+        case "friendly": "face.smiling"
+        case "confident": "bolt"
+        case "academic": "graduationcap"
+        case "concise": "scissors"
+        default: custom?.symbol ?? "leaf"
         }
     }
 
     var guidance: String {
-        switch self {
-        case .natural: "Keep the writer's own voice. Only fix what is wrong or unclear."
-        case .casual: "Relaxed and conversational, like a message to a coworker you know well. Contractions are fine."
-        case .professional: "Clear, polite and businesslike. No slang. Suitable for clients and managers."
-        case .friendly: "Warm, positive and approachable, without being over the top."
-        case .confident: "Direct and assured. Remove hedging like 'I think', 'just', 'maybe' where it weakens the message."
-        case .academic: "Formal, precise and objective. Avoid contractions and casual phrasing."
-        case .concise: "As short as possible while keeping the meaning. Cut filler words."
+        switch id {
+        case "natural": "Keep the writer's own voice. Only fix what is wrong or unclear."
+        case "casual": "Relaxed and conversational, like a message to a coworker you know well. Contractions are fine."
+        case "professional": "Clear, polite and businesslike. No slang. Suitable for clients and managers."
+        case "friendly": "Warm, positive and approachable, without being over the top."
+        case "confident": "Direct and assured. Remove hedging like 'I think', 'just', 'maybe' where it weakens the message."
+        case "academic": "Formal, precise and objective. Avoid contractions and casual phrasing."
+        case "concise": "As short as possible while keeping the meaning. Cut filler words."
+        default: custom.map { $0.guidance.isEmpty ? "Sound \($0.name.lowercased())." : $0.guidance } ?? Tone.natural.guidance
         }
     }
+}
+
+/// A tone the user defined: a name, an icon and a description of how it should sound.
+struct CustomTone: Codable, Identifiable, Equatable {
+    var id = "custom-" + UUID().uuidString
+    var name: String
+    var guidance: String
+    var symbol: String = "paintbrush"
+
+    static let symbols = ["paintbrush", "heart", "star", "flame", "sparkles", "megaphone", "hand.wave", "lightbulb",
+                          "person.2", "crown", "theatermasks", "music.note", "wand.and.stars", "globe", "book", "pencil.and.scribble"]
+}
+
+/// Custom tones, readable from anywhere (kept in sync by AppSettings).
+enum ToneRegistry {
+    nonisolated(unsafe) static var custom: [CustomTone] = []
 }
 
 /// How many suggestions to show.
@@ -96,21 +138,48 @@ struct WritingLanguage: Hashable, Identifiable {
     static func find(_ code: String) -> WritingLanguage { all.first { $0.code == code } ?? all[0] }
 }
 
-enum IssueKind: String, Codable, CaseIterable {
-    case spelling, grammar, clarity, tone
+enum IssueKind: String, Codable, CaseIterable, Identifiable {
+    case spelling, grammar, punctuation, capitalization, clarity, tone
+
+    var id: String { rawValue }
 
     var label: String {
         switch self {
         case .spelling: "Spelling"
         case .grammar: "Grammar"
+        case .punctuation: "Punctuation"
+        case .capitalization: "Capitalization"
         case .clarity: "Clarity"
         case .tone: "Tone"
         }
     }
 
+    var symbol: String {
+        switch self {
+        case .spelling: "textformat.abc"
+        case .grammar: "text.badge.checkmark"
+        case .punctuation: "ellipsis.curlybraces"
+        case .capitalization: "textformat.size"
+        case .clarity: "text.line.first.and.arrowtriangle.forward"
+        case .tone: "theatermasks"
+        }
+    }
+
+    /// Plain description, for settings.
+    var detail: String {
+        switch self {
+        case .spelling: "Misspelled words"
+        case .grammar: "Agreement, tense, articles and word forms"
+        case .punctuation: "Missing full stops, question marks and commas"
+        case .capitalization: "Capital letters at the start of sentences and for names"
+        case .clarity: "Sentences that could be clearer or shorter"
+        case .tone: "Sentences that don't fit your tone"
+        }
+    }
+
     var color: NSColor {
         switch self {
-        case .spelling, .grammar: Theme.red
+        case .spelling, .grammar, .punctuation, .capitalization: Theme.red
         case .clarity: Theme.blue
         case .tone: Theme.purple
         }

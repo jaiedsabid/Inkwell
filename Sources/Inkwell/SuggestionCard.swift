@@ -74,6 +74,8 @@ final class CardModel: ObservableObject {
 struct CardActions {
     var accept: (Issue) -> Void
     var dismiss: (Issue) -> Void
+    var ignoreAlways: (Issue) -> Void = { _ in }
+    var stopKind: (IssueKind) -> Void = { _ in }
     var fixAll: () -> Void = {}
     var addWord: (String) -> Void = { _ in }
     var disableApp: () -> Void = {}
@@ -89,8 +91,12 @@ struct SuggestionCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             if let issue = model.current {
                 HStack(spacing: 6) {
-                    Circle().fill(Color(nsColor: issue.kind.color)).frame(width: 8, height: 8)
-                    Text(issue.kind.label).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    // What kind of suggestion this is
+                    Label(issue.kind.label, systemImage: issue.kind.symbol)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color(nsColor: issue.kind.color))
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Color(nsColor: issue.kind.color).opacity(0.13), in: Capsule())
                     Spacer()
                     if model.issues.count > 1 {
                         Button { model.index = (model.index - 1 + model.issues.count) % model.issues.count } label: { Image(systemName: "chevron.left") }
@@ -127,8 +133,9 @@ struct SuggestionCardView: View {
                     }
                     .buttonStyle(PrimaryButtonStyle())
 
-                    Button("Dismiss") { actions.dismiss(issue) }
+                    Button("Ignore") { actions.dismiss(issue) }
                         .buttonStyle(SecondaryButtonStyle())
+                        .help("Ignore this suggestion here")
                     Spacer()
                     if model.fixAllCount > 1, !issue.kind.isSentenceLevel {
                         Button("Fix all \(model.fixAllCount)") { actions.fixAll() }
@@ -136,6 +143,9 @@ struct SuggestionCardView: View {
                             .lineLimit(1).fixedSize()
                     }
                     Menu {
+                        Button("Always ignore this suggestion") { actions.ignoreAlways(issue) }
+                        Button("Stop checking \(issue.kind.label.lowercased())") { actions.stopKind(issue.kind) }
+                        Divider()
                         if issue.kind == .spelling {
                             Button("Add “\(issue.original)” to dictionary") { actions.addWord(issue.original) }
                         }

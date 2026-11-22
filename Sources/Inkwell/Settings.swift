@@ -51,6 +51,17 @@ final class AppSettings: ObservableObject {
     // Writing
     @Published var languageCode: String { didSet { save("languageCode", languageCode) } }
     @Published var tone: Tone { didSet { save("tone", tone) } }
+    /// Tones the user made. Shown after the built-in ones everywhere a tone can be picked.
+    @Published var customTones: [CustomTone] {
+        didSet {
+            ToneRegistry.custom = customTones
+            save("customTones", customTones)
+            // A deleted tone falls back to Natural wherever it was used.
+            if !tone.exists { tone = .natural }
+            let stale = appTones.filter { !$0.value.exists }.map(\.key)
+            if !stale.isEmpty { for k in stale { appTones[k] = nil } }
+        }
+    }
     @Published var autoDetectLanguage: Bool { didSet { save("autoDetectLanguage", autoDetectLanguage) } }
     @Published var strictness: Strictness { didSet { save("strictness", strictness) } }
     @Published var showExplanations: Bool { didSet { save("showExplanations", showExplanations) } }
@@ -67,6 +78,10 @@ final class AppSettings: ObservableObject {
     @Published var disabledSites: Set<String> { didSet { save("disabledSites", disabledSites) } }
     /// Words never flagged (names, slang, product terms).
     @Published var dictionary: [String] { didSet { save("dictionary", dictionary) } }
+    /// Suggestions the user chose to always ignore ("original→replacement", lowercased).
+    @Published var ignoredSuggestions: [String] { didSet { save("ignoredSuggestions", ignoredSuggestions) } }
+    /// Kinds of suggestion the user turned off.
+    @Published var disabledKinds: Set<IssueKind> { didSet { save("disabledKinds", disabledKinds) } }
 
     // AI
     @Published var engine: EngineKind { didSet { save("engine", engine) } }
@@ -95,7 +110,11 @@ final class AppSettings: ObservableObject {
         checkDelay = load("checkDelay", 0.7)
         onboarded = load("onboarded", false)
         languageCode = load("languageCode", Self.defaultLanguage())
-        tone = load("tone", .natural)
+        let customs = load("customTones", [CustomTone]())
+        ToneRegistry.custom = customs
+        customTones = customs
+        let savedTone = load("tone", Tone.natural)
+        tone = savedTone.exists ? savedTone : .natural
         autoDetectLanguage = load("autoDetectLanguage", true)
         strictness = load("strictness", .standard)
         showExplanations = load("showExplanations", true)
@@ -106,6 +125,8 @@ final class AppSettings: ObservableObject {
         disabledApps = load("disabledApps", Self.defaultDisabledApps)
         disabledSites = load("disabledSites", [])
         dictionary = load("dictionary", [])
+        ignoredSuggestions = load("ignoredSuggestions", [])
+        disabledKinds = load("disabledKinds", [])
         engine = load("engine", .cloud)
         provider = load("provider", .anthropic)
         checkModel = load("checkModel", Provider.anthropic.defaultCheckModel)
@@ -138,7 +159,7 @@ final class AppSettings: ObservableObject {
     var isActive: Bool { enabled && !isPaused }
     var language: WritingLanguage { WritingLanguage.find(languageCode) }
 
-    func tone(for bundleID: String?) -> Tone { bundleID.flatMap { appTones[$0] } ?? tone }
+    func tone(for bundleID: String?) -> Tone { bundleID.flatMap { appTones[$0] }.flatMap { $0.exists ? $0 : nil } ?? tone }
 
     func isDisabled(app bundleID: String?, host: String?) -> Bool {
         if let b = bundleID, disabledApps.contains(b) { return true }

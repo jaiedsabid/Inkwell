@@ -43,6 +43,8 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 final class SettingsNav: ObservableObject {
     static let shared = SettingsNav()
     @Published var pane: SettingsPane = .general
+    /// Opens the tone editor (nil: closed). A tone without a saved match is new.
+    @Published var editingTone: CustomTone?
 }
 
 struct SettingsView: View {
@@ -77,6 +79,7 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
             .navigationTitle(nav.pane.title)
+            .sheet(item: $nav.editingTone) { t in ToneEditor(draft: t) }
         }
         .frame(width: 760, height: 540)
     }
@@ -139,6 +142,7 @@ struct GeneralPane: View {
 
 struct WritingPane: View {
     @ObservedObject var settings = AppSettings.shared
+    @ObservedObject var nav = SettingsNav.shared
 
     var body: some View {
         Form {
@@ -150,12 +154,36 @@ struct WritingPane: View {
                 }
             }
             Section {
-                ToneGrid(selection: $settings.tone, columns: 4).padding(.vertical, 4)
+                ToneGrid(selection: $settings.tone, columns: 4, onAdd: { nav.editingTone = CustomTone(name: "", guidance: "") })
+                    .padding(.vertical, 4)
                 Text(settings.tone.guidance).font(.callout).foregroundStyle(.secondary)
             } header: {
                 Text("Default tone")
             } footer: {
                 Text("You can pick a different tone for each app in Apps & Websites.")
+            }
+            Section {
+                if settings.customTones.isEmpty {
+                    Text("Make a tone that sounds like you, like “Warm but brief” or “Playful, with British spelling”.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                ForEach(settings.customTones) { t in
+                    HStack(spacing: 10) {
+                        Image(systemName: t.symbol).foregroundStyle(Theme.accent).frame(width: 20)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(t.name)
+                            Text(t.guidance).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                        Spacer()
+                        Button { nav.editingTone = t } label: { Image(systemName: "pencil") }
+                            .buttonStyle(.borderless).help("Edit")
+                        Button { settings.customTones.removeAll { $0.id == t.id } } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary).help("Delete")
+                    }
+                }
+                Button { nav.editingTone = CustomTone(name: "", guidance: "") } label: { Label("New tone", systemImage: "plus") }
+            } header: {
+                Text("Your tones")
             }
             Section("Suggestions") {
                 Picker("How strict", selection: $settings.strictness) {
@@ -172,8 +200,25 @@ struct WritingPane: View {
                     Text("A purple line when a sentence sounds off for your tone, like too blunt or too casual.")
                 }
             }
+            Section {
+                ForEach(IssueKind.allCases.filter { $0 != .tone }) { kind in
+                    Toggle(isOn: Binding(get: { !settings.disabledKinds.contains(kind) },
+                                         set: { if $0 { settings.disabledKinds.remove(kind) } else { settings.disabledKinds.insert(kind) } })) {
+                        Label {
+                            Text(kind.label)
+                            Text(kind.detail)
+                        } icon: {
+                            Image(systemName: kind.symbol).foregroundStyle(Color(nsColor: kind.color))
+                        }
+                    }
+                }
+            } header: {
+                Text("What to check")
+            } footer: {
+                Text("Tone is under Suggestions above.")
+            }
             Section("What the colors mean") {
-                ColorRow(color: Theme.red, style: "Wavy", title: "Mistake", detail: "Spelling or grammar. Hover to see the fix.")
+                ColorRow(color: Theme.red, style: "Wavy", title: "Mistake", detail: "Spelling, grammar, punctuation or capitals. Hover to see the fix and its type.")
                 ColorRow(color: Theme.blue, style: "Line", title: "Clearer sentence", detail: "The whole sentence could read better.")
                 if settings.toneCheck {
                     ColorRow(color: Theme.purple, style: "Dashed", title: "Tone", detail: "The sentence doesn't match the tone you picked.")
@@ -425,6 +470,25 @@ struct PrivacyPane: View {
                 Text("Words here are never marked as mistakes.")
             }
 
+            Section {
+                if settings.ignoredSuggestions.isEmpty {
+                    Text("None. Choose “Always ignore this suggestion” in a suggestion's ••• menu to stop seeing it.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                ForEach(settings.ignoredSuggestions, id: \.self) { key in
+                    HStack {
+                        Text(key.replacingOccurrences(of: "→", with: "  →  ")).lineLimit(1).truncationMode(.middle)
+                        Spacer()
+                        Button { settings.ignoredSuggestions.removeAll { $0 == key } } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain).help("Show this suggestion again")
+                    }
+                }
+            } header: {
+                Text("Ignored suggestions (\(settings.ignoredSuggestions.count))")
+            }
+
             Section("Privacy") {
                 PrivacyRow(symbol: "lock.fill", title: "Password fields are never read", detail: "Secure fields are skipped in every app.")
                 PrivacyRow(symbol: "hand.raised.fill", title: "Off in password managers and terminals", detail: "Change this in Apps & Websites.")
@@ -496,6 +560,141 @@ struct PromptsPane: View {
             } footer: {
                 Text("These appear as buttons in the chat panel, next to Shorter, Friendlier and the others. You can also right-click anything you typed in the chat and choose “Save as a quick prompt”.")
             }
+        }
+    }
+}
+
+// MARK: - Tone editor
+
+struct ToneEditor: View {
+    @ObservedObject var settings = AppSettings.shared
+    @Environment(\.dismiss) private var dismiss
+    @Loc private var draft: CustomTone
+    @Loc private var preview: String?
+    @Loc private var previewing = false
+
+    private let isNew: Bool
+    private let sample = "hey, the meeting got moved to 3pm tomorrow. can you still make it? let me know asap"
+    private let ideas = ["Warm but brief", "Playful and witty", "Calm and reassuring", "Direct, no small talk",
+                         "Polite, with British spelling", "Enthusiastic, like a good teacher"]
+
+    init(draft: CustomTone) {
+        _draft = Loc(wrappedValue: draft)
+        isNew = !AppSettings.shared.customTones.contains { $0.id == draft.id }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(isNew ? "New tone" : "Edit tone").font(.title2.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Name").font(.callout.weight(.medium))
+                TextField("", text: $draft.name, prompt: Text("Like “Founder”, “Gentle” or “Pirate”"))
+                    .textFieldStyle(.roundedBorder).labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("How should it sound?").font(.callout.weight(.medium))
+                TextField("", text: $draft.guidance, prompt: Text("Describe it in plain words, like “Friendly and short. Use simple words. No exclamation marks.”"), axis: .vertical)
+                    .textFieldStyle(.roundedBorder).labelsHidden().lineLimit(3...6)
+                HStack(spacing: 6) {
+                    ForEach(ideas.prefix(3), id: \.self) { idea in ideaChip(idea) }
+                }
+                HStack(spacing: 6) {
+                    ForEach(ideas.suffix(3), id: \.self) { idea in ideaChip(idea) }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Icon").font(.callout.weight(.medium))
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(30), spacing: 6), count: 8), alignment: .leading, spacing: 6) {
+                    ForEach(CustomTone.symbols, id: \.self) { sym in
+                        Button { draft.symbol = sym } label: {
+                            Image(systemName: sym)
+                                .frame(width: 30, height: 30)
+                                .foregroundStyle(draft.symbol == sym ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                                .background(draft.symbol == sym ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.quaternary.opacity(0.6)),
+                                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Try it").font(.callout.weight(.medium))
+                    Spacer()
+                    if previewing { ProgressView().controlSize(.small) }
+                    Button("Rewrite sample") { runPreview() }.disabled(!canSave || previewing).controlSize(.small)
+                }
+                Text(sample).font(.callout).foregroundStyle(.secondary)
+                if let preview {
+                    Text(preview).font(.callout).textSelection(.enabled)
+                        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            }
+
+            HStack {
+                if !isNew {
+                    Button("Delete", role: .destructive) {
+                        settings.customTones.removeAll { $0.id == draft.id }
+                        dismiss()
+                    }
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(isNew ? "Add tone" : "Save") { save() }
+                    .buttonStyle(.borderedProminent).tint(Theme.accent)
+                    .keyboardShortcut(.defaultAction).disabled(!canSave)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+    }
+
+    private var canSave: Bool { !draft.name.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    private func ideaChip(_ idea: String) -> some View {
+        Button(idea) {
+            draft.guidance = idea + "."
+            if draft.name.trimmingCharacters(in: .whitespaces).isEmpty { draft.name = idea.components(separatedBy: CharacterSet(charactersIn: ",")).first ?? idea }
+        }
+        .buttonStyle(.plain).font(.caption)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Color.primary.opacity(0.07), in: Capsule())
+    }
+
+    private func save() {
+        draft.name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.guidance = draft.guidance.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let i = settings.customTones.firstIndex(where: { $0.id == draft.id }) {
+            settings.customTones[i] = draft
+        } else {
+            settings.customTones.append(draft)
+            settings.tone = Tone(id: draft.id)   // a new tone is usually wanted right away
+        }
+        dismiss()
+    }
+
+    private func runPreview() {
+        previewing = true
+        preview = nil
+        let guidance = draft.guidance.isEmpty ? "Sound \(draft.name.lowercased())." : draft.guidance
+        Task {
+            do {
+                let client = try AI.client()
+                let system = """
+                You rewrite text in a requested tone. Reply with only the rewritten text.
+                Tone: \(draft.name). \(guidance)
+                """
+                let out = try await client.complete(system: system, messages: [.init(role: .user, text: sample)], jsonSchema: nil, purpose: .chat)
+                preview = ChatPrompt.clean(out)
+            } catch {
+                preview = error.localizedDescription
+            }
+            previewing = false
         }
     }
 }

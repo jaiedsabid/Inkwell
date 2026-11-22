@@ -4,6 +4,9 @@ import SwiftUI
 struct ToneGrid: View {
     @Binding var selection: Tone
     var columns = 4
+    /// Shows a "+ New" chip that calls this.
+    var onAdd: (() -> Void)? = nil
+    @ObservedObject private var settings = AppSettings.shared   // redraw when custom tones change
 
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: columns), spacing: 6) {
@@ -22,6 +25,20 @@ struct ToneGrid: View {
                 }
                 .buttonStyle(.plain)
                 .help(tone.guidance)
+            }
+            if let onAdd {
+                Button(action: onAdd) {
+                    VStack(spacing: 3) {
+                        Image(systemName: "plus").font(.system(size: 13, weight: .medium))
+                        Text("New tone").font(.system(size: 10.5, weight: .medium)).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .foregroundStyle(.secondary)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Color.secondary.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Make your own tone")
             }
         }
     }
@@ -61,7 +78,7 @@ struct MenuContent: View {
             Divider()
             VStack(alignment: .leading, spacing: 8) {
                 Text("Tone").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ToneGrid(selection: $settings.tone)
+                ToneGrid(selection: $settings.tone, onAdd: { closeMenu(); AppDelegate.shared?.showNewTone() })
             }
             HStack {
                 Text("Language").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -122,7 +139,7 @@ struct MenuContent: View {
                 closeMenu(); AppDelegate.shared?.showOnboarding()
             }
         } else if settings.enabled && !AI.isConfigured {
-            Notice(symbol: "key", color: .orange, text: "Spelling works now. Add an AI key for grammar and rewrites.", button: "Set up") {
+            Notice(symbol: "key", color: .orange, text: setupText, button: "Set up") {
                 closeMenu(); AppDelegate.shared?.showSettings(.ai)
             }
         }
@@ -140,6 +157,14 @@ struct MenuContent: View {
                 .menuStyle(.borderlessButton).fixedSize()
                 Spacer()
             }
+        }
+    }
+
+    private var setupText: String {
+        switch settings.engine {
+        case .cloud: "Spelling works now. Add an AI key for grammar and rewrites."
+        case .local: "Spelling works now. Download a local model for grammar and rewrites."
+        case .onDevice: "Apple's on-device model isn't ready (\(OnDevice.unavailableReason ?? "unavailable")). Choose another AI."
         }
     }
 

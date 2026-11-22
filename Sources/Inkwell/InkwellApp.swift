@@ -76,6 +76,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         present(settingsWindow!)
     }
 
+    /// Settings → Writing with the tone editor open.
+    func showNewTone() {
+        showSettings(.writing)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            SettingsNav.shared.editingTone = CustomTone(name: "", guidance: "")
+        }
+    }
+
     func showOnboarding() {
         if onboardingWindow == nil {
             let view = OnboardingView(finish: { [weak self] in self?.onboardingWindow?.close() })

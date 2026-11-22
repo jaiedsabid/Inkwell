@@ -41,6 +41,17 @@ final class Coordinator: ObservableObject {
         card.configure(actions: CardActions(
             accept: { [weak self] in self?.accept($0) },
             dismiss: { [weak self] in self?.dismiss($0) },
+            ignoreAlways: { [weak self] issue in
+                let s = AppSettings.shared
+                if !s.ignoredSuggestions.contains(issue.dismissKey) { s.ignoredSuggestions.append(issue.dismissKey) }
+                Stats.shared.dismissed()
+                self?.card.hide()
+            },
+            stopKind: { [weak self] kind in
+                AppSettings.shared.disabledKinds.insert(kind)
+                self?.card.hide()
+                Toast.shared.show("\(kind.label) checks are off. Turn them back on in Settings → Writing.", duration: 4)
+            },
             fixAll: { [weak self] in self?.fixAll() },
             addWord: { [weak self] word in
                 AppSettings.shared.addToDictionary(word)
@@ -73,6 +84,9 @@ final class Coordinator: ObservableObject {
                           settings.$dictionary.dropFirst().map { _ in () }, settings.$autoDetectLanguage.dropFirst().map { _ in () },
                           settings.$toneCheck.dropFirst().map { _ in () })
             .sink { [weak self] in DispatchQueue.main.async { self?.checker.invalidate() } }.store(in: &bag)
+        Publishers.Merge(settings.$ignoredSuggestions.dropFirst().map { _ in () }, settings.$disabledKinds.dropFirst().map { _ in () })
+            .sink { [weak self] in DispatchQueue.main.async { self?.checker.recompute() } }.store(in: &bag)
+        settings.$customTones.dropFirst().sink { [weak self] _ in DispatchQueue.main.async { self?.checker.invalidate() } }.store(in: &bag)
         Publishers.Merge(settings.$disabledApps.dropFirst().map { _ in () }, settings.$disabledSites.dropFirst().map { _ in () })
             .sink { [weak self] in DispatchQueue.main.async { self?.refreshNow() } }.store(in: &bag)
         installMouseMonitors()

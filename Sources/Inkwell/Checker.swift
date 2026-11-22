@@ -86,7 +86,7 @@ enum TextTools {
                 let range = NSRange(location: s.range.location + last.range.location, length: last.range.length)
                 if !skip(NSRange(location: range.location, length: range.length + 1)) {
                     let question = questionStarts.contains(first.word.lowercased().trimmingCharacters(in: .punctuationCharacters))
-                    out.append(Issue(range: range, kind: .grammar, original: last.word, replacement: last.word + (question ? "?" : "."),
+                    out.append(Issue(range: range, kind: .punctuation, original: last.word, replacement: last.word + (question ? "?" : "."),
                                      explanation: question ? "This is a question, so end it with a question mark." : "End the sentence with a full stop."))
                 }
             }
@@ -103,7 +103,7 @@ enum TextTools {
                 if let c = w.first, c.isLowercase, c.isLetter, w.dropFirst().allSatisfy({ !$0.isUppercase }), w.count > 1 || c == "i" {
                     let range = NSRange(location: s.range.location + word.range.location, length: word.range.length)
                     if !skip(range) {
-                        out.append(Issue(range: range, kind: .grammar, original: w, replacement: w.prefix(1).uppercased() + w.dropFirst(),
+                        out.append(Issue(range: range, kind: .capitalization, original: w, replacement: w.prefix(1).uppercased() + w.dropFirst(),
                                          explanation: "Start a sentence with a capital letter."))
                     }
                 }
@@ -163,9 +163,10 @@ enum CheckPrompt {
 
         Kinds:
         - "spelling": a misspelled word.
-        - "grammar": a grammar, agreement, tense, article, word-form or punctuation mistake.
-          A missing full stop or question mark at the end of a sentence, and a sentence that doesn't start with a capital letter, are grammar issues too.
-          For spelling and grammar, "original" is the shortest exact span that has to change (usually 1-3 words) and "replacement" is its fix.
+        - "grammar": a grammar, agreement, tense, article or word-form mistake.
+        - "punctuation": a missing or wrong full stop, question mark, comma, apostrophe or other punctuation mark.
+        - "capitalization": a missing capital letter (start of a sentence, names, "I") or a wrong one.
+          For spelling, grammar, punctuation and capitalization, "original" is the shortest exact span that has to change (usually 1-3 words) and "replacement" is its fix.
         - "clarity": the whole sentence is awkward, confusing, wordy or could be clearly better. "original" is the entire sentence exactly as given and "replacement" is the improved sentence, with any spelling and grammar fixes included. At most one clarity issue per sentence.
         """
         if o.toneCheck {
@@ -405,7 +406,7 @@ final class Checker: ObservableObject {
 
     private func key(_ sentence: String) -> String {
         let o = options
-        return "\(o.languageName)|\(o.tone.rawValue)|\(o.strictness.rawValue)|\(o.toneCheck)|\(sentence)"
+        return "\(o.languageName)|\(o.tone.id)|\(o.tone.guidance.hashValue)|\(o.strictness.rawValue)|\(o.toneCheck)|\(sentence)"
     }
 
     func recompute() {
@@ -436,8 +437,9 @@ final class Checker: ObservableObject {
                     !taken.contains { NSIntersectionRange($0.range, p.range).length > 0 || $0.range.location == p.range.location }
                 }
         }
+        let s = AppSettings.shared
         let merged = (ai + local)
-            .filter { !dismissed.contains($0.dismissKey) }
+            .filter { !dismissed.contains($0.dismissKey) && !s.ignoredSuggestions.contains($0.dismissKey) && !s.disabledKinds.contains($0.kind) }
             .sorted { $0.range.location < $1.range.location }
         if merged != issues { issues = merged }
     }
