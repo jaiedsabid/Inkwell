@@ -102,6 +102,7 @@ struct OnboardingView: View {
                     Button("Open System Settings") { AX.requestTrust(); AX.openAccessibilitySettings() }
                         .buttonStyle(.borderedProminent).tint(Theme.accent).controlSize(.large)
                     Text("Turn on Inkwell in the list, then come back here.").font(.caption).foregroundStyle(.secondary)
+                    PermissionHelp()
                 }
             }
         }
@@ -201,5 +202,33 @@ struct EngineCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Shown under "Open System Settings" while access is still missing.
+struct PermissionHelp: View {
+    @Loc private var open = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Button(open ? "Hide help" : "Already turned it on, but it still says no?") { withAnimation { open.toggle() } }
+                .buttonStyle(.link).font(.caption)
+            if open {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("macOS can keep an old entry from an earlier copy of Inkwell, so the switch looks on but doesn't apply to this copy.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text("1. Click Reset, then turn Inkwell on again in the list.\n2. Still no? Click Restart Inkwell.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Reset permission") { AX.resetPermission() }
+                        Button("Restart Inkwell") { AX.relaunch() }
+                    }
+                    .controlSize(.small)
+                }
+                .padding(10)
+                .frame(maxWidth: 420, alignment: .leading)
+                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
     }
 }

@@ -43,7 +43,7 @@ CNF
     security import "$DIR/id.p12" -k "$KEYCHAIN" -P "$PASS" -T /usr/bin/codesign >/dev/null
     echo "Created \"$NAME\": $(fingerprint)"
     echo "The first build may ask to let codesign use the key: choose Always Allow."
-    echo "Now back it up:  scripts/signing_identity.sh export ~/Desktop/punchcard-signing"
+    echo "Now back it up:  scripts/signing_identity.sh export ~/Desktop/inkwell-signing"
     ;;
   export)
     OUT="${2:?usage: signing_identity.sh export FILE (without .p12)}"

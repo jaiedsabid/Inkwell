@@ -25,6 +25,7 @@ final class Coordinator: ObservableObject {
     private var seenIssues = Set<String>()
     private var timer: Timer?
     private var tickCount = 0
+    private var wasTrusted = false
     private var hoverWork: DispatchWorkItem?
     private var hoverCandidate: String?
     private var monitors: [Any] = []
@@ -90,8 +91,12 @@ final class Coordinator: ObservableObject {
     private func tick() {
         tickCount += 1
         guard settings.isActive else { return stop(.off) }
-        guard AX.isTrusted else { return stop(.needsPermission) }
-        if monitors.count < 3 { installMouseMonitors() }
+        guard AX.isTrusted else { wasTrusted = false; return stop(.needsPermission) }
+        if !wasTrusted {
+            // Permission just arrived: event monitors made before it don't receive events, so make them again.
+            wasTrusted = true
+            installMouseMonitors()
+        }
 
         guard let front = NSWorkspace.shared.frontmostApplication else { return stop(.idle) }
         // Our own panels (chat, settings) keep the last field as it was.

@@ -16,6 +16,27 @@ enum AX {
         }
     }
 
+    /// Removes Inkwell's Accessibility entry, then asks again. Fixes a stale entry left by an earlier copy of the app
+    /// (the switch shows on, but macOS still says no).
+    static func resetPermission() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        p.arguments = ["reset", "Accessibility", Bundle.main.bundleIdentifier ?? "app.inkwell.mac"]
+        try? p.run()
+        p.waitUntilExit()
+        requestTrust()
+        openAccessibilitySettings()
+    }
+
+    /// Starts a fresh copy of Inkwell and quits this one (some macOS versions only see a new permission after a restart).
+    static func relaunch() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+        try? p.run()
+        NSApp.terminate(nil)
+    }
+
     static let systemWide = AXUIElementCreateSystemWide()
 
     // MARK: Reading

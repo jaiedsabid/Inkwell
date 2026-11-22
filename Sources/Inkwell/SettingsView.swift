@@ -128,6 +128,7 @@ struct GeneralPane: View {
                     Text("Accessibility access")
                     Text("Lets Inkwell see the text field you're typing in and apply fixes. Password fields are always skipped.")
                 }
+                if !trusted { PermissionHelp().frame(maxWidth: .infinity, alignment: .leading) }
             }
         }
         .onReceive(poll) { _ in trusted = AX.isTrusted }
