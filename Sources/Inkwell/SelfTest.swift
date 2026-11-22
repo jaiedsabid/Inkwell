@@ -165,6 +165,21 @@ enum SelfTest {
               && CheckPrompt.verifiedKind(.spelling, original: "alot", replacement: "a lot") == .spelling
               && CheckPrompt.verifiedKind(.grammar, original: "could of", replacement: "could have") == .grammar
               && CheckPrompt.verifiedKind(.grammar, original: "help", replacement: "assistance") == .clarity, "check: kind matches the change")
+        do {
+            let txt = "They're waiting for to get into the better place. Love to see how they improveing."
+            let reply = #"{"issues":[{"sentence":1,"kind":"grammar","original":"They're waiting for to get into the better place","replacement":"They're waiting to get into a better place.","explanation":""},{"sentence":2,"kind":"grammar","original":"Love to see how they improveing","replacement":"Love to see how they're improving.","explanation":""}]}"#
+            let ss = TextTools.sentences(txt)
+            let parsed = CheckPrompt.parse(reply, sentences: [1: ss[0].text, 2: ss[1].text]) ?? [:]
+            let all = parsed.values.flatMap { $0 }
+            check(!all.isEmpty && all.allSatisfy { !$0.replacement.hasSuffix(".") || $0.original.hasSuffix(".") }, "check: no second full stop from a sentence copied without one")
+            let ns = txt as NSString
+            let doubled = Issue(range: ns.range(of: "improveing"), kind: .spelling, original: "improveing", replacement: "improving.", explanation: "")
+            check(TextTools.withoutDoubledPunctuation(doubled, in: ns)?.replacement == "improving", "check: fix doesn't add punctuation that's there")
+            let onlyDot = Issue(range: ns.range(of: "place"), kind: .punctuation, original: "place", replacement: "place.", explanation: "")
+            check(TextTools.withoutDoubledPunctuation(onlyDot, in: ns) == nil, "check: full stop already there is no issue")
+            let needed = Issue(range: NSRange(location: 0, length: 4), kind: .punctuation, original: "soon", replacement: "soon.", explanation: "")
+            check(TextTools.withoutDoubledPunctuation(needed, in: "soon" as NSString) != nil, "check: missing full stop still flagged")
+        }
         check(Autocomplete.firstWord(of: " quick brown") == " quick" && Autocomplete.firstWord(of: "s, then") == "s,", "suggestion: first word")
         check(Autocomplete.worthSuggesting("Hello, I am writing") && !Autocomplete.worthSuggesting("Hi") && !Autocomplete.worthSuggesting("Some text here\n"), "suggestion: when to suggest")
         check(!Autocomplete.worthSuggesting("That went well. ") && !Autocomplete.worthSuggesting("That went well. We"), "suggestion: not at a new sentence")
@@ -231,7 +246,10 @@ enum SelfTest {
 
     /// `Inkwell --aitest`: runs one real check with the configured engine and prints what comes back.
     static func aiTest() async -> Bool {
-        let sentences = [1: "I has a apple and it are red. after lunch we left but the store was closed", 2: "The meeting that we had was a meeting where things were discussed by us.", 3: "Thanks for your help."]
+        var sentences = [1: "I has a apple and it are red. after lunch we left but the store was closed", 2: "The meeting that we had was a meeting where things were discussed by us.", 3: "Thanks for your help."]
+        if let custom = ProcessInfo.processInfo.environment["INKWELL_CHECK_TEXT"] {
+            sentences = Dictionary(uniqueKeysWithValues: TextTools.sentences(custom).enumerated().map { ($0.offset + 1, $0.element.text) })
+        }
         print("Engine: \(AppSettings.shared.engine.rawValue)")
         do {
             let client = try AI.client()
@@ -267,7 +285,10 @@ enum SelfTest {
             if let e = store.errors[id] { print("Download failed: \(e)"); return false }
         }
         let client = LocalClient(model: m, path: store.path(m).path)
-        let sentences = [1: "I has a apple and it are red. after lunch we left but the store was closed", 2: "The meeting that we had was a meeting where things were discussed by us.", 3: "Thanks for your help."]
+        var sentences = [1: "I has a apple and it are red. after lunch we left but the store was closed", 2: "The meeting that we had was a meeting where things were discussed by us.", 3: "Thanks for your help."]
+        if let custom = ProcessInfo.processInfo.environment["INKWELL_CHECK_TEXT"] {
+            sentences = Dictionary(uniqueKeysWithValues: TextTools.sentences(custom).enumerated().map { ($0.offset + 1, $0.element.text) })
+        }
         do {
             var t = Date()
             let opts = CheckPrompt.Options(languageName: "English (US)", tone: .professional, strictness: .standard, toneCheck: false)
@@ -275,6 +296,7 @@ enum SelfTest {
                                                 messages: [.init(role: .user, text: CheckPrompt.user(sentences.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }))],
                                                 jsonSchema: CheckPrompt.schema, purpose: .check)
             print(String(format: "Check (incl. loading) %.1fs", Date().timeIntervalSince(t)))
+            if ProcessInfo.processInfo.environment["INKWELL_CHECK_TEXT"] != nil { print("Raw: \(raw)") }
             guard let parsed = CheckPrompt.parse(raw, sentences: sentences) else { print("Unreadable:\n\(raw)"); return false }
             for (sid, list) in parsed.sorted(by: { $0.key < $1.key }) {
                 for i in list { print("  [\(sid)] \(i.kind.rawValue): \"\(i.original)\" → \"\(i.replacement)\"") }

@@ -112,6 +112,33 @@ enum TextTools {
         return out
     }
 
+    /// How many UTF-16 units of the punctuation that `wanted` ends with (and `have` lacks) already follow `range`.
+    /// "place" → "place." with ". Love…" after it: 1.
+    static func punctuationAlreadyThere(after range: NSRange, in text: NSString, wanted: String, have: String) -> Int {
+        let marks = CharacterSet(charactersIn: ".!?,;:…")
+        func tail(_ s: String) -> String { String(s.reversed().prefix(while: { $0.unicodeScalars.allSatisfy(marks.contains) }).reversed()) }
+        let want = tail(wanted.trimmingCharacters(in: .whitespaces)), got = tail(have.trimmingCharacters(in: .whitespaces))
+        guard want.count > got.count, want.hasSuffix(got) || got.isEmpty else { return 0 }
+        let extra = String(want.dropLast(got.count))
+        let end = NSMaxRange(range)
+        let len = (extra as NSString).length
+        guard end + len <= text.length else { return 0 }
+        let next = text.substring(with: NSRange(location: end, length: len))
+        // Any sentence end already there counts: don't add "." after "?" or "!".
+        if next == extra || (".!?".contains(extra) && len == 1 && ".!?".contains(next)) { return len }
+        return 0
+    }
+
+    /// A fix must not add punctuation the text already has right after it ("improveing" → "improving." before a ".").
+    static func withoutDoubledPunctuation(_ issue: Issue, in text: NSString) -> Issue? {
+        guard !issue.kind.isSentenceLevel, NSMaxRange(issue.range) <= text.length else { return issue }
+        let n = punctuationAlreadyThere(after: issue.range, in: text, wanted: issue.replacement, have: issue.original)
+        guard n > 0 else { return issue }
+        var i = issue
+        i.replacement = String(i.replacement.dropLast(n))
+        return i.replacement == i.original ? nil : i
+    }
+
     /// Finds `needle` in `haystack` (exact first, then ignoring case). UTF-16 range.
     static func locate(_ needle: String, in haystack: String) -> NSRange? {
         guard !needle.isEmpty else { return nil }
@@ -267,7 +294,10 @@ enum CheckPrompt {
         for item in reply.issues {
             guard let text = sentences[item.sentence], var kind = IssueKind(rawValue: item.kind) else { continue }
             let original = item.original, replacement = item.replacement
-            guard original != replacement, let r = TextTools.locate(original, in: text) else { continue }
+            guard original != replacement, var r = TextTools.locate(original, in: text) else { continue }
+            // Models often copy a sentence without its final full stop but write the fix with one: take the
+            // punctuation that's really there into the span, so the fix doesn't add a second one.
+            r.length += TextTools.punctuationAlreadyThere(after: r, in: text as NSString, wanted: replacement, have: original)
             let explanation = item.explanation.trimmingCharacters(in: .whitespacesAndNewlines)
             let found = (text as NSString).substring(with: r)
             if !kind.isSentenceLevel { kind = verifiedKind(kind, original: found, replacement: replacement) }
@@ -542,8 +572,19 @@ final class Checker: ObservableObject {
         }
         let dict = AppSettings.shared.dictionarySet
         ai.removeAll { !$0.kind.isSentenceLevel && dict.contains($0.original.lowercased()) }
+        let spellAll = TextTools.spelling(text, language: language.spellCode, ignored: dict)
+        // A spelling fix should be the closest real word: "improveing" → "improving" (spell checker) beats
+        // "improve" (a small model). The AI keeps fixes that change more than spelling.
+        ai.removeAll { a in
+            guard a.kind == .spelling else { return false }
+            let core = { (s: String) in s.trimmingCharacters(in: .punctuationCharacters).lowercased() }
+            return spellAll.contains { sp in
+                NSIntersectionRange(sp.range, a.range).length > 0
+                    && CheckPrompt.editDistance(core(sp.original), core(sp.replacement)) < CheckPrompt.editDistance(core(a.original), core(a.replacement))
+            }
+        }
         let wordLevelAI = ai.filter { !$0.kind.isSentenceLevel }
-        let spell = TextTools.spelling(text, language: language.spellCode, ignored: dict)
+        let spell = spellAll
             .filter { sp in
                 // The AI's own fix wins where both found something.
                 !wordLevelAI.contains { NSIntersectionRange($0.range, sp.range).length > 0 }
@@ -572,7 +613,8 @@ final class Checker: ObservableObject {
         let merged = (ai + local)
             .filter { !dismissed.contains($0.dismissKey) && !s.ignoredSuggestions.contains($0.dismissKey) && !s.disabledKinds.contains($0.kind) }
             .sorted { $0.range.location < $1.range.location }
-        let withContext = merged.map { Self.addContext($0, in: text as NSString) }
+        let withContext = merged.compactMap { TextTools.withoutDoubledPunctuation($0, in: text as NSString) }
+            .map { Self.addContext($0, in: text as NSString) }
         if withContext != issues { issues = withContext }
     }
 
