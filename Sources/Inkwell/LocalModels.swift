@@ -285,7 +285,7 @@ struct LocalClient: LLMClient {
         var system = system
         if jsonSchema != nil { system += "\n\nReply with only the JSON object." }
         let out = try await LlamaEngine.shared.complete(path: path, system: system, messages: messages,
-                                                        grammar: jsonSchema.map(GBNF.from), maxTokens: purpose == .check ? 900 : 1200)
+                                                        grammar: jsonSchema.map(GBNF.from), maxTokens: purpose == .complete ? 48 : purpose == .check ? 900 : 1200)
         // Strip any thinking block a model adds anyway.
         if let r = out.range(of: "</think>") { return String(out[r.upperBound...]) }
         return out

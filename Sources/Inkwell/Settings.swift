@@ -126,6 +126,9 @@ final class AppSettings: ObservableObject {
     /// The user's own chat prompts, shown as chips in the chat panel.
     @Published var savedPrompts: [SavedPrompt] { didSet { save("savedPrompts", savedPrompts) } }
     @Published var collectStats: Bool { didSet { save("collectStats", collectStats) } }
+    /// Gray next-word suggestions after the cursor.
+    @Published var autocomplete: Bool { didSet { save("autocomplete", autocomplete) } }
+    @Published var completionLength: CompletionLength { didSet { save("completionLength", completionLength) } }
 
     // Apps & privacy
     /// Tone per app, by bundle identifier. Apps not listed use `tone`.
@@ -183,6 +186,8 @@ final class AppSettings: ObservableObject {
         toneCheck = load("toneCheck", true)
         savedPrompts = load("savedPrompts", SavedPrompt.defaults)
         collectStats = load("collectStats", true)
+        autocomplete = load("autocomplete", true)
+        completionLength = load("completionLength", .phrase)
         appTones = load("appTones", [:])
         disabledApps = load("disabledApps", Self.defaultDisabledApps)
         disabledSites = load("disabledSites", [])

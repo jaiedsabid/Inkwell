@@ -14,6 +14,8 @@ final class OverlayController {
     private(set) var segments: [Segment] = []
     private(set) var badge: (rect: CGRect, count: Int)?
     var hoveredID: String? { didSet { if hoveredID != oldValue { redraw() } } }
+    /// Next-word suggestion after the cursor.
+    var ghost: Ghost? { didSet { if ghost != oldValue { redraw() } } }
 
     init() {
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
@@ -48,11 +50,13 @@ final class OverlayController {
         for w in windows {
             let local = segments.filter { $0.rect.intersects(w.frame) }
             let b = badge.flatMap { $0.rect.intersects(w.frame) ? $0 : nil }
+            let g = ghost.flatMap { $0.rect.intersects(w.frame) ? $0 : nil }
             w.canvas.set(segments: local, badge: b, hovered: hoveredID, origin: w.frame.origin)
+            w.canvas.ghost = g
             // Draw right now, before the window is shown or hidden. Otherwise macOS shows the window's last picture
             // (the previous underline, in its old place) for a moment when it comes back.
             w.canvas.display()
-            if local.isEmpty && b == nil { w.orderOut(nil) } else if !w.isVisible { w.orderFrontRegardless() }
+            if local.isEmpty && b == nil && g == nil { w.orderOut(nil) } else if !w.isVisible { w.orderFrontRegardless() }
             Log.write("overlay \(w.windowNumber): \(local.count) underlines, visible \(w.isVisible)", key: "overlay\(w.windowNumber)")
         }
     }
@@ -92,6 +96,8 @@ final class OverlayCanvas: NSView {
     private var badge: (rect: CGRect, count: Int)?
     private var hovered: String?
     private var origin: CGPoint = .zero
+    var ghost: Ghost? { didSet { needsDisplay = true } }
+    var originForGhost: CGPoint { origin }
 
     override var isFlipped: Bool { false }
 
@@ -144,6 +150,7 @@ final class OverlayCanvas: NSView {
             }
             path.stroke()
         }
+        if let g = ghost { drawGhost(g) }
         if let b = badge {
             // Fallback when the app can't tell us where words are: a count pill at the field's corner.
             let r = b.rect.offsetBy(dx: -origin.x, dy: -origin.y)
@@ -155,5 +162,32 @@ final class OverlayCanvas: NSView {
             let size = text.size(withAttributes: attrs)
             text.draw(at: CGPoint(x: r.midX - size.width / 2, y: r.midY - size.height / 2), withAttributes: attrs)
         }
+    }
+}
+
+extension OverlayCanvas {
+    /// Gray continuation text on the cursor's line, then a small "tab" hint.
+    func drawGhost(_ g: Ghost) {
+        let local = g.rect.offsetBy(dx: -originForGhost.x, dy: -originForGhost.y)
+        let font = NSFont.systemFont(ofSize: g.fontSize)
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byTruncatingTail
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor(white: 0.5, alpha: 0.85), .paragraphStyle: para]
+        let text = g.text as NSString
+        let size = text.size(withAttributes: attrs)
+        let hintAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: max(9, g.fontSize * 0.62), weight: .semibold),
+                                                        .foregroundColor: NSColor(white: 0.5, alpha: 0.9)]
+        let hint = "tab" as NSString
+        let hintSize = hint.size(withAttributes: hintAttrs)
+        let hintW = hintSize.width + 10
+        let textW = min(size.width, max(0, local.width - hintW - 6))
+        let y = local.minY + (local.height - size.height) / 2
+        text.draw(with: CGRect(x: local.minX, y: y, width: textW, height: size.height), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
+        let pill = CGRect(x: local.minX + textW + 6, y: local.midY - (hintSize.height + 2) / 2, width: hintW, height: hintSize.height + 2)
+        let path = NSBezierPath(roundedRect: pill, xRadius: 4, yRadius: 4)
+        NSColor(white: 0.5, alpha: 0.6).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+        hint.draw(at: CGPoint(x: pill.minX + 5, y: pill.minY + 1), withAttributes: hintAttrs)
     }
 }

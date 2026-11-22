@@ -149,6 +149,17 @@ enum AX {
         return rect
     }
 
+    /// Font size of the character at `index`, when the app reports styled text.
+    static func fontSize(_ el: AXUIElement, at index: Int) -> CGFloat? {
+        var cf = CFRange(location: max(0, index), length: 1)
+        guard let param = AXValueCreate(.cfRange, &cf),
+              let v = parameterized(el, kAXAttributedStringForRangeParameterizedAttribute, param),
+              let attr = v as? NSAttributedString, attr.length > 0,
+              let font = attr.attribute(NSAttributedString.Key("AXFont"), at: 0, effectiveRange: nil) as? [String: Any],
+              let size = font["AXFontSize"] as? CGFloat, size > 4, size < 72 else { return nil }
+        return size
+    }
+
     static func line(_ el: AXUIElement, forIndex i: Int) -> Int? {
         let n = NSNumber(value: i)
         return parameterized(el, kAXLineForIndexParameterizedAttribute, n) as? Int

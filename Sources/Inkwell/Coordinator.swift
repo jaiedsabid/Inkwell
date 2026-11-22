@@ -40,6 +40,7 @@ final class Coordinator: ObservableObject {
     private let settings = AppSettings.shared
 
     func start() {
+        Autocomplete.shared.overlay = overlay
         card.configure(actions: CardActions(
             accept: { [weak self] in self?.accept($0) },
             dismiss: { [weak self] in self?.dismiss($0) },
@@ -117,6 +118,7 @@ final class Coordinator: ObservableObject {
             // Permission just arrived: event monitors made before it don't receive events, so make them again.
             wasTrusted = true
             installMouseMonitors()
+            Autocomplete.shared.installKeyTap()
         }
 
         guard let front = NSWorkspace.shared.frontmostApplication else { return stop(.idle) }
@@ -174,6 +176,7 @@ final class Coordinator: ObservableObject {
             lastWordCount = words
             checker.textChanged(value, cursor: AX.selectedRange(el)?.location)
         }
+        Autocomplete.shared.update(element: el, value: value, selection: AX.selectedRange(el))
         // Positions move when the field scrolls or the window moves, so re-measure regularly.
         if checker.issues.count <= 30 || tickCount % 4 == 0 { layout() }
     }
@@ -188,6 +191,7 @@ final class Coordinator: ObservableObject {
     }
 
     private func stopChecking() {
+        Autocomplete.shared.dismiss(reset: true)
         if lastValue != nil { lastValue = nil; checker.reset() }
         overlay.clear()
         card.hide()

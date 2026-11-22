@@ -201,6 +201,22 @@ struct WritingPane: View {
                 }
             }
             Section {
+                Toggle(isOn: $settings.autocomplete) {
+                    Text("Suggest what comes next")
+                    Text("Gray text after the cursor when you pause. Tab accepts it, → takes one word, Esc hides it.")
+                }
+                if settings.autocomplete {
+                    Picker("Length", selection: $settings.completionLength) {
+                        ForEach(CompletionLength.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+            } header: {
+                Text("Next-word suggestions")
+            } footer: {
+                Text("Uses your live-checking model. Works at the end of a line, in any app where Inkwell is on.")
+            }
+            Section {
                 ForEach(IssueKind.allCases.filter { $0 != .tone }) { kind in
                     Toggle(isOn: Binding(get: { !settings.disabledKinds.contains(kind) },
                                          set: { if $0 { settings.disabledKinds.remove(kind) } else { settings.disabledKinds.insert(kind) } })) {

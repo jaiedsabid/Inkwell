@@ -67,6 +67,24 @@ enum Snapshot {
             SettingsNav.shared.pane = pane
             render(SettingsView(), "settings-\(pane.rawValue)", url)
         }
+        // Next-word suggestion as drawn over a text field
+        for (name, bg, fg) in [("ghost-light", NSColor.white, NSColor.black), ("ghost-dark", NSColor(white: 0.12, alpha: 1), NSColor.white)] {
+            let typed = "Thanks so much for your help with the" as NSString
+            let font = NSFont.systemFont(ofSize: 14)
+            let typedW = typed.size(withAttributes: [.font: font]).width
+            let canvas = OverlayCanvas(frame: CGRect(x: 0, y: 0, width: 560, height: 44))
+            canvas.set(segments: [], badge: nil, hovered: nil, origin: .zero)
+            canvas.ghost = Ghost(text: " file organization project", rect: CGRect(x: 16 + typedW, y: 13, width: 560 - 22 - typedW, height: 18), fontSize: 14)
+            let img = NSImage(size: canvas.bounds.size)
+            img.lockFocus()
+            bg.setFill(); canvas.bounds.fill()
+            typed.draw(at: CGPoint(x: 16, y: 13 + (18 - typed.size(withAttributes: [.font: font]).height) / 2), withAttributes: [.font: font, .foregroundColor: fg])
+            canvas.draw(canvas.bounds)
+            img.unlockFocus()
+            if let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                try? rep.representation(using: .png, properties: [:])?.write(to: url.appendingPathComponent("\(name).png"))
+            }
+        }
         print("Snapshots written to \(dir)")
     }
 

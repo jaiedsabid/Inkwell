@@ -101,6 +101,17 @@ enum SelfTest {
         check(pis.first { $0.original == "soon" }?.kind == .punctuation && pis.first { $0.original == "we" }?.kind == .capitalization, "punctuation and capitalization have their own type")
         check(CheckPrompt.system(.init(languageName: "English", tone: .natural, strictness: .standard, toneCheck: false)).contains("\"punctuation\":"), "prompt explains punctuation type")
 
+        // Next-word suggestions
+        check(Autocomplete.clean("\"quick brown fox\"\nmore", after: "The ", length: .phrase) == "quick brown fox", "suggestion: strips quotes and extra lines")
+        check(Autocomplete.clean(" for your help", after: "Thanks ", length: .phrase) == "for your help", "suggestion: no double space")
+        check(Autocomplete.clean("See you soon", after: "Thanks.", length: .phrase) == " See you soon", "suggestion: space after punctuation")
+        check(Autocomplete.clean("s for the help", after: "Thank", length: .phrase) == "s for the help", "suggestion: finishes a word")
+        check(Autocomplete.clean("file organization", after: "help with the", length: .phrase) == " file organization", "suggestion: adds missing space")
+        check(Autocomplete.clean("I wanted to say thanks", after: "I wanted to say", length: .phrase) == " thanks", "suggestion: drops repeated text")
+        check(Autocomplete.clean("   ", after: "Hello there", length: .phrase).isEmpty, "suggestion: blank reply is nothing")
+        check(Autocomplete.firstWord(of: " quick brown") == " quick" && Autocomplete.firstWord(of: "s, then") == "s,", "suggestion: first word")
+        check(Autocomplete.worthSuggesting("Hello, I am writing") && !Autocomplete.worthSuggesting("Hi") && !Autocomplete.worthSuggesting("Some text here\n"), "suggestion: when to suggest")
+
         // Custom tones
         let old = try? JSONDecoder().decode(Tone.self, from: Data("\"professional\"".utf8))
         check(old == .professional && old?.label == "Professional", "tones saved before custom tones still load")
@@ -203,6 +214,12 @@ enum SelfTest {
                                                  messages: ChatPrompt.messages(source: "hey can u send me the report by tmrw its urgent", turns: [.init(prompt: "make it professional")]),
                                                  jsonSchema: nil, purpose: .chat)
             print(String(format: "Rewrite %.1fs: %@", Date().timeIntervalSince(t), ChatPrompt.clean(chat)))
+            for before in ["Thanks so much for your help with the", "I'm writing to let you know that the meeting", "Could you please send me"] {
+                t = Date()
+                let raw = try await client.complete(system: Autocomplete.prompt(length: .phrase, tone: .natural, language: "English (US)"),
+                                                    messages: [.init(role: .user, text: before)], jsonSchema: nil, purpose: .complete)
+                print(String(format: "Suggest %.1fs: %@[%@]", Date().timeIntervalSince(t), before, Autocomplete.clean(raw, after: before, length: .phrase)))
+            }
             return true
         } catch {
             print("Failed: \(error.localizedDescription)")

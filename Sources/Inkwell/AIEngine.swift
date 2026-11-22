@@ -9,7 +9,11 @@ struct ChatMessage: Equatable {
     var text: String
 }
 
-enum AIPurpose { case check, chat }
+enum AIPurpose {
+    case check, chat, complete
+    /// Live checks and next-word suggestions use the fast model.
+    var isFast: Bool { self != .chat }
+}
 
 enum AIError: LocalizedError {
     case noKey, noModel, noLocalModel, onDeviceUnavailable(String), http(Int, String), refused, badResponse, cancelled
@@ -41,21 +45,21 @@ struct AnthropicClient: LLMClient {
     let chatModel: String
 
     func complete(system: String, messages: [ChatMessage], jsonSchema: [String: Any]?, purpose: AIPurpose) async throws -> String {
-        let model = purpose == .check ? checkModel : chatModel
+        let model = purpose.isFast ? checkModel : chatModel
         var body: [String: Any] = [
             "model": model,
-            "max_tokens": purpose == .check ? 4000 : 8000,
+            "max_tokens": purpose == .complete ? 300 : purpose.isFast ? 4000 : 8000,
             "system": system,
             "messages": messages.map { ["role": $0.role.rawValue, "content": $0.text] },
         ]
         // Live checking must be fast: low effort. Rewrites get a little more thought.
-        var output: [String: Any] = ["effort": purpose == .check ? "low" : "medium"]
+        var output: [String: Any] = ["effort": purpose.isFast ? "low" : "medium"]
         if let schema = jsonSchema { output["format"] = ["type": "json_schema", "schema": schema] }
         body["output_config"] = output
 
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         req.httpMethod = "POST"
-        req.timeoutInterval = purpose == .check ? 30 : 90
+        req.timeoutInterval = purpose.isFast ? 30 : 90
         req.setValue("application/json", forHTTPHeaderField: "content-type")
         req.setValue(key, forHTTPHeaderField: "x-api-key")
         req.setValue("2026-10-21", forHTTPHeaderField: "anthropic-version")
@@ -92,7 +96,7 @@ struct OpenAIClient: LLMClient {
     var timeoutScale: Double = 1
 
     func complete(system: String, messages: [ChatMessage], jsonSchema: [String: Any]?, purpose: AIPurpose) async throws -> String {
-        let model = purpose == .check ? checkModel : chatModel
+        let model = purpose.isFast ? checkModel : chatModel
         guard !model.isEmpty else { throw AIError.noModel }
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs += messages.map { ["role": $0.role.rawValue, "content": $0.text] }
@@ -113,7 +117,7 @@ struct OpenAIClient: LLMClient {
     private func send(_ body: [String: Any], _ purpose: AIPurpose) async throws -> String {
         var req = URLRequest(url: URL(string: baseURL + "/chat/completions")!)
         req.httpMethod = "POST"
-        req.timeoutInterval = (purpose == .check ? 30 : 90) * timeoutScale
+        req.timeoutInterval = (purpose.isFast ? 30 : 90) * timeoutScale
         req.setValue("application/json", forHTTPHeaderField: "content-type")
         if let key { req.setValue("Bearer \(key)", forHTTPHeaderField: "authorization") }
         for (k, v) in extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
@@ -141,7 +145,7 @@ struct GeminiClient: LLMClient {
     let chatModel: String
 
     func complete(system: String, messages: [ChatMessage], jsonSchema: [String: Any]?, purpose: AIPurpose) async throws -> String {
-        let model = (purpose == .check ? checkModel : chatModel).replacingOccurrences(of: "models/", with: "")
+        let model = (purpose.isFast ? checkModel : chatModel).replacingOccurrences(of: "models/", with: "")
         var body: [String: Any] = [
             "system_instruction": ["parts": [["text": system]]],
             "contents": messages.map { ["role": $0.role == .user ? "user" : "model", "parts": [["text": $0.text]]] },
@@ -158,7 +162,7 @@ struct GeminiClient: LLMClient {
         let path = model.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? model
         var req = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(path):generateContent")!)
         req.httpMethod = "POST"
-        req.timeoutInterval = purpose == .check ? 30 : 90
+        req.timeoutInterval = purpose.isFast ? 30 : 90
         req.setValue("application/json", forHTTPHeaderField: "content-type")
         req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
