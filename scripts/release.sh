@@ -61,18 +61,19 @@ TODAY="$(date +%Y-%m-%d)"
 awk -v v="$VERSION" -v d="$TODAY" '
     !done && /^## \[Unreleased\]/ { print; print ""; print "## [" v "] - " d; done = 1; next }
     { print }' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
-# Comparison links at the bottom.
-PREV="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-sed -i '' '/^\[Unreleased\]: /d; /^\['"$VERSION"'\]: /d' CHANGELOG.md
-sed -i '' -e :a -e '/^\n*$/{$d;N;ba' -e '}' CHANGELOG.md
+# Comparison links at the bottom, rebuilt from the version headings (newest first).
+grep -v '^\[[^]]*\]: ' CHANGELOG.md | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > CHANGELOG.md.tmp
+VERSIONS=($(grep -o '^## \[[0-9][^]]*\]' CHANGELOG.md.tmp | sed 's/^## \[\(.*\)\]/\1/'))
 {
     echo
-    echo "[Unreleased]: https://github.com/$REPO/compare/$TAG...HEAD"
-    if [ -n "$PREV" ]; then echo "[$VERSION]: https://github.com/$REPO/compare/$PREV...$TAG"
-    else echo "[$VERSION]: https://github.com/$REPO/releases/tag/$TAG"; fi
-} >> CHANGELOG.md
-# Keep older version links: move them below the new ones.
-awk '/^\[[0-9]/ && seen[$0]++ { next } { print }' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+    echo "[Unreleased]: https://github.com/$REPO/compare/v${VERSIONS[0]}...HEAD"
+    for i in "${!VERSIONS[@]}"; do
+        v="${VERSIONS[$i]}"; older="${VERSIONS[$((i + 1))]:-}"
+        if [ -n "$older" ]; then echo "[$v]: https://github.com/$REPO/compare/v$older...v$v"
+        else echo "[$v]: https://github.com/$REPO/releases/tag/v$v"; fi
+    done
+} >> CHANGELOG.md.tmp
+mv CHANGELOG.md.tmp CHANGELOG.md
 
 echo "$VERSION" > VERSION
 git add VERSION CHANGELOG.md
