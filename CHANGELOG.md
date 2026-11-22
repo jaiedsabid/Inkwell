@@ -4,6 +4,8 @@ All notable changes to Inkwell are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-23
+
 ### Added
 
 - **Automatic updates** with [Sparkle](https://sparkle-project.org): Inkwell checks once a day and asks before installing; Settings → General has Check for Updates… and a switch for automatic checks. Updates are signed and verified, and settings and the Accessibility permission are kept.
@@ -40,6 +42,7 @@ All notable changes to Inkwell are listed here. The format follows [Keep a Chang
 - **Privacy defaults.** Password fields are never read; password managers and terminals are off by default; no analytics. Accepting a fix types the text instead of using the clipboard, and any paste is marked so clipboard managers skip it.
 - Settings show in the Dock and ⌘Tab while open; the version is shown in Settings → General → About.
 
-[Unreleased]: https://github.com/jaiedsabid/Inkwell/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/jaiedsabid/Inkwell/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jaiedsabid/Inkwell/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/jaiedsabid/Inkwell/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jaiedsabid/Inkwell/releases/tag/v0.1.0
