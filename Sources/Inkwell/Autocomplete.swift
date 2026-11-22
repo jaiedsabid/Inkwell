@@ -226,7 +226,8 @@ final class Autocomplete {
         - completion: the exact text to insert at the cursor. Length: \(length.rule)
         - Continue the thought they started. Use only what the text already implies: never invent names, numbers, dates, places or facts.
         - Prefer the most common, natural continuation over a creative one. Match their spelling, casing and style.
-        - If the last word is unfinished, complete it with no leading space. Otherwise start with a space.
+        - If the last word is unfinished, reply with only its missing letters and what follows, with no leading space: \
+        "AI m" → "odel", never "model". Otherwise start with a space.
         - Stop at a natural break: the end of a phrase or sentence.
         - confidence: how likely they'd type exactly this. 5 = almost certain, 4 = very likely, 3 or less = a guess. \
         When it would only be a guess, use 1 and an empty completion.
@@ -235,6 +236,7 @@ final class Autocomplete {
         "Let me know if you have any" → {"completion": " questions.", "confidence": 5}
         "Looking forward to" → {"completion": " hearing from you.", "confidence": 4}
         "Thanks for the upd" → {"completion": "ate", "confidence": 5}
+        "We trained a new AI m" → {"completion": "odel", "confidence": 4}
         "The quarterly numbers show that" → {"completion": "", "confidence": 1}
         "I wanted to follow up on" → {"completion": " our conversation", "confidence": 4}
         """
@@ -251,6 +253,16 @@ final class Autocomplete {
         let tail = String(before.suffix(40))
         if let r = s.range(of: tail), r.lowerBound == s.startIndex { s = String(s[r.upperBound...]) }
         if before.last?.isWhitespace == true { s = String(s.drop(while: { $0 == " " })) }
+        // Half-typed word: models often send the whole word ("m" → "model") instead of the rest ("odel").
+        if let last = before.last, last.isLetter {
+            let partial = String(before.reversed().prefix(while: \.isLetter).reversed())
+            let body = s.drop(while: { $0 == " " })
+            let hadSpace = body.count != s.count
+            let partialIsWord = partial.count == 1 ? ["a", "i"].contains(partial.lowercased()) : isWord(partial)
+            if body.lowercased().hasPrefix(partial.lowercased()), body.count > partial.count, !hadSpace || !partialIsWord {
+                s = String(body.dropFirst(partial.count))
+            }
+        }
         if let last = before.last, ".,!?;:".contains(last), let first = s.first, first.isLetter { s = " " + s }
         // Models often forget the space before a new word. Joining is right only when it finishes a real word
         // ("Thank" + "s"); otherwise ("the" + "file") a space is missing.

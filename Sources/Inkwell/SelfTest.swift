@@ -107,6 +107,11 @@ enum SelfTest {
         check(Autocomplete.clean("See you soon", after: "Thanks.", length: .phrase) == " See you soon", "suggestion: space after punctuation")
         check(Autocomplete.clean("s for the help", after: "Thank", length: .phrase) == "s for the help", "suggestion: finishes a word")
         check(Autocomplete.clean("file organization", after: "help with the", length: .phrase) == " file organization", "suggestion: adds missing space")
+        check(Autocomplete.clean("model.", after: "AI m", length: .phrase) == "odel.", "suggestion: whole word sent for a half-typed word")
+        check(Autocomplete.clean(" model", after: "AI m", length: .phrase) == "odel", "suggestion: whole word with a space")
+        check(Autocomplete.clean("Update", after: "Thanks for the upd", length: .phrase) == "ate", "suggestion: whole word, other case")
+        check(Autocomplete.clean(" amazing", after: "I am", length: .phrase) == " amazing", "suggestion: next word that starts like the last one")
+        check(Autocomplete.clean("odel for text", after: "AI m", length: .phrase) == "odel for text", "suggestion: correct rest of word untouched")
         check(Autocomplete.clean("I wanted to say thanks", after: "I wanted to say", length: .phrase) == " thanks", "suggestion: drops repeated text")
         check(Autocomplete.clean("   ", after: "Hello there", length: .phrase).isEmpty, "suggestion: blank reply is nothing")
         check(Autocomplete.firstWord(of: " quick brown") == " quick" && Autocomplete.firstWord(of: "s, then") == "s,", "suggestion: first word")
@@ -229,7 +234,7 @@ enum SelfTest {
                                                  jsonSchema: nil, purpose: .chat)
             print(String(format: "Rewrite %.1fs: %@", Date().timeIntervalSince(t), ChatPrompt.clean(chat)))
             let samples = ["Thanks so much for your help with the", "I'm writing to let you know that the meeting", "Could you please send me",
-                           "Let me know if you have any", "Hope you're doing", "The results of the experiment suggest that", "Sorry for the late"]
+                           "Let me know if you have any", "Hope you're doing", "The results of the experiment suggest that", "Sorry for the late", "We are building a new AI m", "Thanks for the upd"]
             for before in samples {
                 t = Date()
                 let ctx = Autocomplete.Context(app: "Mail", window: "Re: Project update", field: "Message body")
