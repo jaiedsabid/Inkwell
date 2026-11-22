@@ -89,4 +89,5 @@ All sources are in `Sources/Inkwell`.
 - `brand/app-icon.svg` is the master icon. `brand/glyph-*.svg` are the glyphs, and `glyph-menubar.svg` is the menu bar template.
 - `scripts/make_icons.sh` renders `Resources/AppIcon.icns`, `Resources/MenuIcon*.png` and `brand/app-icon-1024.png` with headless Chrome.
 - `brand/brand-guide.html` covers colours, type, voice and usage.
+- The website is `site/` (one static page, with assets copied from `images/`). `scripts/deploy_site.sh` publishes it to the `gh-pages` branch, which GitHub Pages serves at https://jaiedsabid.github.io/Inkwell/.
 - README images live in `images/`. The banner and hero image were rendered from HTML with headless Chrome; the other screenshots come from `--snapshot`.

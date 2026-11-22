@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/jaiedsabid/Inkwell/releases/latest"><img src="images/download-macos-badge.svg" alt="Download for macOS" width="132" height="40"></a>
   <br>
-  <sub>Free and open source · macOS 15 or later · Apple silicon</sub>
+  <sub>Free and open source · macOS 15 or later · Apple silicon · <a href="https://jaiedsabid.github.io/Inkwell/">Website</a></sub>
 </p>
 
 <p align="center">

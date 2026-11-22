@@ -45,7 +45,9 @@ publish() {
         echo "SHA-256: \`$(cut -d' ' -f1 "$DMG.sha256")\`"
     } > "$body"
     # appcast.xml rides along: the app reads it from the latest release.
-    gh release create "$TAG" "$DMG" "$DMG.sha256" dist/appcast.xml --repo "$REPO" --title "Inkwell $VERSION" --notes-file "$body" --verify-tag
+    # Inkwell.dmg, a copy under a fixed name, so …/releases/latest/download/Inkwell.dmg is always the newest (the website uses it).
+    cp "$DMG" dist/Inkwell.dmg
+    gh release create "$TAG" "$DMG" "$DMG.sha256" dist/appcast.xml dist/Inkwell.dmg --repo "$REPO" --title "Inkwell $VERSION" --notes-file "$body" --verify-tag
     rm -f "$body"
     echo "Published $TAG: https://github.com/$REPO/releases/tag/$TAG"
 }
