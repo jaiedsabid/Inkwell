@@ -49,6 +49,9 @@ final class OverlayController {
             let local = segments.filter { $0.rect.intersects(w.frame) }
             let b = badge.flatMap { $0.rect.intersects(w.frame) ? $0 : nil }
             w.canvas.set(segments: local, badge: b, hovered: hoveredID, origin: w.frame.origin)
+            // Draw right now, before the window is shown or hidden. Otherwise macOS shows the window's last picture
+            // (the previous underline, in its old place) for a moment when it comes back.
+            w.canvas.display()
             if local.isEmpty && b == nil { w.orderOut(nil) } else if !w.isVisible { w.orderFrontRegardless() }
             Log.write("overlay \(w.windowNumber): \(local.count) underlines, visible \(w.isVisible)", key: "overlay\(w.windowNumber)")
         }
