@@ -4,6 +4,8 @@ All notable changes to Inkwell are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-22
+
 ### Added
 
 - **Checks in every app.** Spelling, grammar, punctuation, capitalization, clearer sentences and an optional tone check in Mail, Slack, Notes, browsers, Google Docs, Notion and most other Mac apps, through the Accessibility API.
@@ -18,3 +20,6 @@ All notable changes to Inkwell are listed here. The format follows [Keep a Chang
 - **Custom shortcut** for Improve selected text, with ⌥ Space as the default.
 - **Privacy defaults.** Password fields are never read; password managers and terminals are off by default; no analytics. Accepting a fix types the text instead of using the clipboard, and any paste is marked so clipboard managers skip it.
 - Settings show in the Dock and ⌘Tab while open; the version is shown in Settings → General → About.
+
+[Unreleased]: https://github.com/jaiedsabid/Inkwell/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/jaiedsabid/Inkwell/releases/tag/v0.1.0
