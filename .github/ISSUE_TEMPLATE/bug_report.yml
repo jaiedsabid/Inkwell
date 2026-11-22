@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in Inkwell does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. This tracker is public, so please **don't paste API keys or private text you were writing**. For security or privacy problems, email contact@devscrate.com instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead? A screenshot or screen recording helps.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Slack and type …
+        2. Hover the underline
+        3. …
+  - type: input
+    id: app
+    attributes:
+      label: App you were writing in
+      placeholder: Slack, Mail, Chrome (gmail.com), Notes…
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: AI engine
+      options: ["Local model", "Apple on-device", "Anthropic", "OpenAI", "Google Gemini", "OpenRouter", "Ollama", "None (spelling only)"]
+  - type: input
+    id: version
+    attributes:
+      label: Inkwell version
+      description: Settings → General → About shows it, for example 0.1.0 (25).
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac
+      placeholder: macOS 15.2, MacBook Pro M2
+    validations:
+      required: true
+  - type: dropdown
+    id: accessibility
+    attributes:
+      label: Is Inkwell allowed under System Settings → Privacy & Security → Accessibility?
+      options: ["Yes", "No", "Not sure"]

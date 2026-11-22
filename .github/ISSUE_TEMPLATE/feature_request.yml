@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest something Inkwell could do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Requests are read and answered. Please search the open issues first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the problem first.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Inkwell to do?
+      description: The change you have in mind, and any alternatives you tried.
+    validations:
+      required: true

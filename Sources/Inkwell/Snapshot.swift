@@ -11,7 +11,7 @@ enum Snapshot {
         let card = CardModel()
         card.issues = [
             Issue(range: NSRange(location: 2, length: 3), kind: .grammar, original: "has", replacement: "have", explanation: "Use 'have' with 'I'."),
-            Issue(range: NSRange(location: 20, length: 7), kind: .spelling, original: "recieve", replacement: "receive", explanation: ""),
+            Issue(range: NSRange(location: 38, length: 7), kind: .spelling, original: "recieve", replacement: "receive", explanation: ""),
         ]
         let sentence = CardModel()
         sentence.issues = [Issue(range: NSRange(location: 0, length: 40), kind: .clarity, original: "The meeting that we had yesterday was a meeting where many things were discussed.",
@@ -21,7 +21,7 @@ enum Snapshot {
         chat.turns = [ChatModel.Turn(prompt: "make it professional", result: "Could you please send me the report by tomorrow? It's fairly urgent, as the client keeps asking about it."),
                       ChatModel.Turn(prompt: "shorter")]
 
-        card.issues = card.issues.map { Checker.addContext($0, in: "I has a apple and I recieve mail daily." as NSString) }
+        card.issues = card.issues.map { Checker.addContext($0, in: "I has a few notes on the draft, and I recieve the new numbers." as NSString) }
         render(SuggestionCardView(model: card, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-word", url)
         render(SuggestionCardView(model: sentence, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-sentence", url)
         let light = CardModel()

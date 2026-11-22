@@ -133,8 +133,23 @@ struct GeneralPane: View {
                 }
                 if !trusted { PermissionHelp().frame(maxWidth: .infinity, alignment: .leading) }
             }
+            Section("About") {
+                LabeledContent("Version", value: Self.version)
+                LabeledContent("Source and releases") {
+                    Link("github.com/jaiedsabid/Inkwell", destination: URL(string: "https://github.com/jaiedsabid/Inkwell")!)
+                }
+            }
         }
         .onReceive(poll) { _ in trusted = AX.isTrusted }
+    }
+}
+
+extension GeneralPane {
+    static var version: String {
+        let info = Bundle.main.infoDictionary
+        let v = info?["CFBundleShortVersionString"] as? String ?? "dev"
+        let b = info?["CFBundleVersion"] as? String ?? "0"
+        return "\(v) (\(b))"
     }
 }
 

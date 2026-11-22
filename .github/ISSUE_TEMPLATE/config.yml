@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security or privacy problem
+    url: mailto:contact@devscrate.com
+    about: Please email instead of opening a public issue.
