@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Combine
 import SwiftUI
 
 /// The "select text → ask for a change → refine → accept" panel.
@@ -340,9 +341,15 @@ final class ChatController {
     private let panel = FloatingPanel(allowKey: true)
     let model = ChatModel()
 
+    private var sizing: AnyCancellable?
+
     init() {
         panel.level = .floating
         panel.host(ChatView(model: model, accept: { [weak self] in self?.accept() }, close: { [weak self] in self?.close() }))
+        // Grow downward as the conversation gets longer.
+        sizing = model.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { if self?.panel.isVisible == true { self?.panel.fit() } }
+        }
     }
 
     var isOpen: Bool { panel.isVisible }
@@ -379,7 +386,7 @@ final class ChatController {
     }
 
     private func show(near anchor: CGRect?) {
-        if let v = panel.contentView { panel.setContentSize(v.fittingSize) }
+        panel.fit(keepTop: false)
         if let a = anchor, a.width < 4000 {
             panel.place(near: a, gap: 10)
         } else if let s = NSScreen.main {

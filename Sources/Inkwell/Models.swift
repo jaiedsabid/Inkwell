@@ -147,6 +147,8 @@ import SwiftUI
 struct PrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .lineLimit(1)
+            .fixedSize()
             .font(.system(size: 12.5, weight: .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 12).padding(.vertical, 5)
@@ -158,6 +160,8 @@ struct PrimaryButtonStyle: ButtonStyle {
 struct SecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .lineLimit(1)
+            .fixedSize()
             .font(.system(size: 12.5, weight: .medium))
             .padding(.horizontal, 12).padding(.vertical, 5)
             .background(Color.primary.opacity(configuration.isPressed ? 0.16 : 0.09), in: RoundedRectangle(cornerRadius: 7, style: .continuous))

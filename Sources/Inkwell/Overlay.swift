@@ -30,7 +30,13 @@ final class OverlayController {
 
     func update(segments: [Segment], badge: (rect: CGRect, count: Int)?) {
         let badgeSame = self.badge?.rect == badge?.rect && self.badge?.count == badge?.count
-        guard segments != self.segments || !badgeSame else { return }
+        guard segments != self.segments || !badgeSame else {
+            // Same marks: just make sure their window is still on screen.
+            if !segments.isEmpty || badge != nil {
+                for w in windows where !w.isVisible && segments.contains(where: { $0.rect.intersects(w.frame) }) { w.orderFrontRegardless() }
+            }
+            return
+        }
         self.segments = segments
         self.badge = badge
         redraw()
@@ -44,6 +50,7 @@ final class OverlayController {
             let b = badge.flatMap { $0.rect.intersects(w.frame) ? $0 : nil }
             w.canvas.set(segments: local, badge: b, hovered: hoveredID, origin: w.frame.origin)
             if local.isEmpty && b == nil { w.orderOut(nil) } else if !w.isVisible { w.orderFrontRegardless() }
+            Log.write("overlay \(w.windowNumber): \(local.count) underlines, visible \(w.isVisible)", key: "overlay\(w.windowNumber)")
         }
     }
 

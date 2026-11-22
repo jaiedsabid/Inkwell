@@ -104,8 +104,14 @@ final class Coordinator: ObservableObject {
         frontApp = front
         AX.prepare(app: front)
 
-        guard let el = AX.focusedElement(), AX.pid(el) == front.processIdentifier,
-              !AX.isSecure(el), AX.isEditableText(el) else { return stop(.idle) }
+        let app = front.bundleIdentifier ?? "?"
+        guard let el = AX.focusedElement() else { Log.write("\(app): no focused element"); return stop(.idle) }
+        let role = AX.role(el)
+        guard !AX.isSecure(el) else { Log.write("\(app): secure field skipped"); return stop(.idle) }
+        guard AX.isEditableText(el) else {
+            Log.write("\(app): focused \(role)/\(AX.subrole(el)) is not editable text (pid \(AX.pid(el) ?? -1) vs \(front.processIdentifier))")
+            return stop(.idle)
+        }
 
         let appName = front.localizedName ?? "this app"
         if element == nil || !CFEqual(element!, el) {
@@ -128,6 +134,7 @@ final class Coordinator: ObservableObject {
         state = .watching(app: appName)
 
         let value = AX.value(el) ?? ""
+        Log.write("\(app): watching \(role), \(checker.issues.count) issues, ai \(checker.status)")
         if value != lastValue {
             lastValue = value
             // Count words the user writes (not text that was already there or pasted in bulk).
@@ -204,6 +211,7 @@ final class Coordinator: ObservableObject {
             let r = CGRect(x: f.maxX - size - 6, y: f.maxY - size - 6, width: size, height: size).flippedToCocoa
             badge = (r, issues.count)
         }
+        Log.write("layout: \(issues.count) issues → \(segments.count) underlines, badge \(badge != nil), field frame \(fieldFrame != nil)", key: "layout")
         overlay.update(segments: segments, badge: badge)
     }
 

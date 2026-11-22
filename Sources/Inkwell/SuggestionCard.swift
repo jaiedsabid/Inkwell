@@ -22,11 +22,26 @@ final class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { allowKey }
     override var canBecomeMain: Bool { false }
 
+    private var hosting: NSView?
+
     /// Hosts a SwiftUI view, sized to fit it.
     func host<V: View>(_ view: V) {
-        let hosting = NSHostingView(rootView: view)
-        contentView = hosting
-        setContentSize(hosting.fittingSize)
+        let h = NSHostingView(rootView: view)
+        hosting = h
+        contentView = h
+        fit()
+    }
+
+    /// Resizes the panel to its SwiftUI content. Call after the content changes; keeps the top edge in place.
+    func fit(keepTop: Bool = true) {
+        guard let h = hosting else { return }
+        h.layoutSubtreeIfNeeded()
+        let size = h.fittingSize
+        guard size.width > 0, size.height > 0, size != frame.size else { return }
+        var f = frame
+        if keepTop { f.origin.y += f.height - size.height }
+        f.size = size
+        setFrame(f, display: true)
     }
 
     /// Places the panel under `anchor` (Cocoa screen coordinates), or above it if there's no room below.
@@ -118,6 +133,7 @@ struct SuggestionCardView: View {
                     if model.fixAllCount > 1, !issue.kind.isSentenceLevel {
                         Button("Fix all \(model.fixAllCount)") { actions.fixAll() }
                             .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.accent)
+                            .lineLimit(1).fixedSize()
                     }
                     Menu {
                         if issue.kind == .spelling {
@@ -160,10 +176,16 @@ final class SuggestionCardController {
         model.issues = issues
         model.index = min(start, max(issues.count - 1, 0))
         self.anchor = anchor
-        if let v = panel.contentView { panel.setContentSize(v.fittingSize) }
+        panel.fit(keepTop: false)
         panel.place(near: anchor)
         if !panel.isVisible { panel.alphaValue = 0; panel.orderFrontRegardless() }
         NSAnimationContext.runAnimationGroup { $0.duration = 0.12; panel.animator().alphaValue = 1 }
+        // SwiftUI finishes laying out the new issue on the next pass: measure again then.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.panel.isVisible else { return }
+            self.panel.fit(keepTop: false)
+            self.panel.place(near: anchor)
+        }
     }
 
     func hide() {
@@ -191,7 +213,7 @@ final class SuggestionCardController {
         if kept.count != model.issues.count {
             model.issues = kept
             model.index = min(model.index, kept.count - 1)
-            if let v = panel.contentView { panel.setContentSize(v.fittingSize) }
+            DispatchQueue.main.async { [weak self] in self?.panel.fit() }
         }
     }
 

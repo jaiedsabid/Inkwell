@@ -24,6 +24,21 @@ enum Snapshot {
         render(SuggestionCardView(model: card, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-word", url)
         render(SuggestionCardView(model: sentence, actions: .init(accept: { _ in }, dismiss: { _ in })), "card-sentence", url)
         render(ChatView(model: chat, accept: {}, close: {}), "chat", url)
+
+        // The real hover-card panel, opened the way hovering opens it.
+        let ctl = SuggestionCardController()
+        ctl.configure(actions: .init(accept: { _ in }, dismiss: { _ in }))
+        ctl.model.fixAllCount = 3
+        ctl.model.appName = "Notes"
+        ctl.show([card.issues[0]], anchor: CGRect(x: 200, y: 600, width: 40, height: 14))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        print("card panel size: \(ctl.frame.size)")
+        if let v = NSApp.windows.first(where: { $0.frame == ctl.frame })?.contentView,
+           let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+            v.cacheDisplay(in: v.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: url.appendingPathComponent("card-panel.png"))
+        }
+        ctl.hide()
         render(MenuContent().background(Color(nsColor: .windowBackgroundColor)), "menu", url)
         render(OnboardingView(finish: {}).background(Color(nsColor: .windowBackgroundColor)), "onboarding", url)
         var sample: [String: DayStats] = [:]
