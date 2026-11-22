@@ -39,6 +39,9 @@ final class Coordinator: ObservableObject {
     private var bag = Set<AnyCancellable>()
     private let settings = AppSettings.shared
 
+    /// Snapshots only: pretend an app is in front.
+    func previewFrontApp(_ app: NSRunningApplication?, host: String? = nil) { frontApp = app; self.host = host }
+
     func start() {
         Autocomplete.shared.overlay = overlay
         card.configure(actions: CardActions(

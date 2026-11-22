@@ -43,7 +43,20 @@ enum Snapshot {
             try? rep.representation(using: .png, properties: [:])?.write(to: url.appendingPathComponent("card-panel.png"))
         }
         ctl.hide()
+        let st = AppSettings.shared
+        let (savedEnabled, savedPause) = (st.enabled, st.pausedUntil)
+        Coordinator.shared.previewFrontApp(NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first
+                                           ?? NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first, host: "docs.google.com")
         render(MenuContent().background(Color(nsColor: .windowBackgroundColor)), "menu", url)
+        render(MenuContent().background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .light), "menu-light", url)
+        st.pausedUntil = Date().addingTimeInterval(3600)
+        render(MenuContent().background(Color(nsColor: .windowBackgroundColor)), "menu-paused", url)
+        st.pausedUntil = nil
+        st.enabled = false
+        render(MenuContent().background(Color(nsColor: .windowBackgroundColor)), "menu-off", url)
+        st.enabled = savedEnabled
+        st.pausedUntil = savedPause
+        Coordinator.shared.previewFrontApp(nil)
         render(OnboardingView(finish: {}).background(Color(nsColor: .windowBackgroundColor)), "onboarding", url)
         var sample: [String: DayStats] = [:]
         for i in 0..<30 {

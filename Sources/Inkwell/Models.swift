@@ -214,13 +214,17 @@ import SwiftUI
 
 /// Accent-filled button that stays colored in panels that never become key (system prominent buttons turn gray there).
 struct PrimaryButtonStyle: ButtonStyle {
+    /// Stretch to the available width (big call-to-action buttons).
+    var fullWidth = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .lineLimit(1)
-            .fixedSize()
+            .fixedSize(horizontal: !fullWidth, vertical: true)
+            .frame(maxWidth: fullWidth ? .infinity : nil)
             .font(.system(size: 12.5, weight: .semibold))
             .foregroundStyle(.white)
-            .padding(.horizontal, 12).padding(.vertical, 5)
+            .padding(.horizontal, 12).padding(.vertical, fullWidth ? 8 : 5)
             .background(Theme.accent.opacity(configuration.isPressed ? 0.75 : 1), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .contentShape(Rectangle())
     }
