@@ -25,6 +25,11 @@ final class Coordinator: ObservableObject {
     private var seenIssues = Set<String>()
     private var timer: Timer?
     private var tickCount = 0
+    /// Underlines already drawn, by content (so they follow their word as text shifts).
+    private var shownKeys = Set<String>()
+    /// First measurement of underlines not drawn yet; drawn once a second measurement agrees.
+    private var pendingRects: [String: [CGRect]] = [:]
+    private var confirmScheduled = false
     private var wasTrusted = false
     private var hoverWork: DispatchWorkItem?
     private var hoverCandidate: String?
@@ -121,6 +126,8 @@ final class Coordinator: ObservableObject {
             checker.reset()
             checker.appBundleID = front.bundleIdentifier
             seenIssues = []
+            shownKeys = []
+            pendingRects = [:]
             lastWordCount = -1
             card.hide()
         } else if tickCount % 8 == 0 {
@@ -191,8 +198,13 @@ final class Coordinator: ObservableObject {
         guard !issues.isEmpty else { overlay.clear(); return }
         let fieldFrame = AX.frame(el)
         var segments: [Segment] = []
+        var anyMeasured = false
+        var needsConfirm = false
+        var keys = Set<String>()
+        var ordinal: [String: Int] = [:]
         for issue in issues {
-            for r in rects(el, issue.range) {
+            var rects: [CGRect] = []
+            for r in self.rects(el, issue.range) {
                 var rect = r
                 if let f = fieldFrame {
                     // Hide marks scrolled out of the field.
@@ -201,11 +213,38 @@ final class Coordinator: ObservableObject {
                     rect = rect.intersection(clip)
                 }
                 guard rect.width >= 2 else { continue }
-                segments.append(Segment(rect: rect.flippedToCocoa, kind: issue.kind, issueID: issue.id))
+                rects.append(rect.flippedToCocoa)
+            }
+            guard !rects.isEmpty else { continue }
+            anyMeasured = true
+            let base = "\(issue.kind.rawValue)|\(issue.original)|\(issue.replacement)"
+            let key = "\(base)#\(ordinal[base, default: 0])"
+            ordinal[base, default: 0] += 1
+            keys.insert(key)
+            // Apps can report a word's old position for a moment after the text changes. Draw a new underline only
+            // when two measurements agree, so it doesn't appear in the wrong place and then jump.
+            Log.write("measure \(issue.original): \(rects.map { "(\(Int($0.minX)),\(Int($0.minY)) w\(Int($0.width)))" }.joined())", key: "m-\(key)")
+            let stable = shownKeys.contains(key) || pendingRects[key].map { Self.same($0, rects) } == true
+            if stable {
+                shownKeys.insert(key)
+                pendingRects[key] = nil
+                segments += rects.map { Segment(rect: $0, kind: issue.kind, issueID: issue.id) }
+            } else {
+                pendingRects[key] = rects
+                needsConfirm = true
+            }
+        }
+        shownKeys.formIntersection(keys)
+        pendingRects = pendingRects.filter { keys.contains($0.key) }
+        if needsConfirm && !confirmScheduled {
+            confirmScheduled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.confirmScheduled = false
+                self?.layout()
             }
         }
         var badge: (rect: CGRect, count: Int)?
-        if segments.isEmpty, let f = fieldFrame {
+        if !anyMeasured, let f = fieldFrame {
             // The app didn't tell us where the words are: show a count badge at the field's bottom-right corner.
             let size: CGFloat = 20
             let r = CGRect(x: f.maxX - size - 6, y: f.maxY - size - 6, width: size, height: size).flippedToCocoa
@@ -213,6 +252,11 @@ final class Coordinator: ObservableObject {
         }
         Log.write("layout: \(issues.count) issues → \(segments.count) underlines, badge \(badge != nil), field frame \(fieldFrame != nil)", key: "layout")
         overlay.update(segments: segments, badge: badge)
+    }
+
+    private static func same(_ a: [CGRect], _ b: [CGRect]) -> Bool {
+        guard a.count == b.count else { return false }
+        return zip(a, b).allSatisfy { abs($0.minX - $1.minX) < 1.5 && abs($0.minY - $1.minY) < 1.5 && abs($0.width - $1.width) < 1.5 }
     }
 
     /// One rect per line the range covers (top-left screen coordinates).
