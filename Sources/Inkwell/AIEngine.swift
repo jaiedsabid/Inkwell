@@ -12,12 +12,13 @@ struct ChatMessage: Equatable {
 enum AIPurpose { case check, chat }
 
 enum AIError: LocalizedError {
-    case noKey, noLocalModel, onDeviceUnavailable(String), http(Int, String), refused, badResponse, cancelled
+    case noKey, noModel, noLocalModel, onDeviceUnavailable(String), http(Int, String), refused, badResponse, cancelled
 
     var errorDescription: String? {
         switch self {
         case .noKey: "Add your API key in Settings → AI Engine."
         case .noLocalModel: "Download a local model in Settings → AI Engine."
+        case .noModel: "Choose a model in Settings → AI Engine."
         case .onDeviceUnavailable(let why): "On-device AI isn't available: \(why)"
         case .http(let code, let msg): "The AI service returned an error (\(code)). \(msg)"
         case .refused: "The AI declined this request."
@@ -80,25 +81,86 @@ struct AnthropicClient: LLMClient {
     }
 }
 
-// MARK: - OpenAI
+// MARK: - OpenAI-compatible (OpenAI, OpenRouter, Ollama)
 
 struct OpenAIClient: LLMClient {
+    var baseURL = "https://api.openai.com/v1"
+    var key: String?
+    let checkModel: String
+    let chatModel: String
+    var extraHeaders: [String: String] = [:]
+    var timeoutScale: Double = 1
+
+    func complete(system: String, messages: [ChatMessage], jsonSchema: [String: Any]?, purpose: AIPurpose) async throws -> String {
+        let model = purpose == .check ? checkModel : chatModel
+        guard !model.isEmpty else { throw AIError.noModel }
+        var msgs: [[String: Any]] = [["role": "system", "content": system]]
+        msgs += messages.map { ["role": $0.role.rawValue, "content": $0.text] }
+        var body: [String: Any] = ["model": model, "messages": msgs]
+        guard let schema = jsonSchema else { return try await send(body, purpose) }
+
+        // Strict schema first; some models/servers only take plain JSON mode, or none.
+        body["response_format"] = ["type": "json_schema", "json_schema": ["name": "result", "schema": schema, "strict": true]]
+        do { return try await send(body, purpose) } catch AIError.http(let code, _) where code == 400 || code == 422 {}
+        body["response_format"] = ["type": "json_object"]
+        do { return try await send(body, purpose) } catch AIError.http(let code, _) where code == 400 || code == 422 {}
+        body["response_format"] = nil
+        msgs[0]["content"] = system + "\n\nReply with only a JSON object."
+        body["messages"] = msgs
+        return try await send(body, purpose)
+    }
+
+    private func send(_ body: [String: Any], _ purpose: AIPurpose) async throws -> String {
+        var req = URLRequest(url: URL(string: baseURL + "/chat/completions")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = (purpose == .check ? 30 : 90) * timeoutScale
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        if let key { req.setValue("Bearer \(key)", forHTTPHeaderField: "authorization") }
+        for (k, v) in extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200, let json else {
+            let err = json?["error"]
+            let msg = ((err as? [String: Any])?["message"] as? String) ?? (err as? String) ?? ""
+            throw AIError.http(status, msg)
+        }
+        let choice = (json["choices"] as? [[String: Any]])?.first
+        guard let text = (choice?["message"] as? [String: Any])?["content"] as? String, !text.isEmpty else { throw AIError.badResponse }
+        return text
+    }
+}
+
+// MARK: - Google Gemini
+
+struct GeminiClient: LLMClient {
     let key: String
     let checkModel: String
     let chatModel: String
 
     func complete(system: String, messages: [ChatMessage], jsonSchema: [String: Any]?, purpose: AIPurpose) async throws -> String {
-        var msgs: [[String: Any]] = [["role": "system", "content": system]]
-        msgs += messages.map { ["role": $0.role.rawValue, "content": $0.text] }
-        var body: [String: Any] = ["model": purpose == .check ? checkModel : chatModel, "messages": msgs]
-        if let schema = jsonSchema {
-            body["response_format"] = ["type": "json_schema", "json_schema": ["name": "result", "schema": schema, "strict": true]]
-        }
-        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        let model = (purpose == .check ? checkModel : chatModel).replacingOccurrences(of: "models/", with: "")
+        var body: [String: Any] = [
+            "system_instruction": ["parts": [["text": system]]],
+            "contents": messages.map { ["role": $0.role == .user ? "user" : "model", "parts": [["text": $0.text]]] },
+        ]
+        guard let schema = jsonSchema else { return try await send(model, body, purpose) }
+        body["generationConfig"] = ["responseMimeType": "application/json", "responseJsonSchema": schema]
+        do { return try await send(model, body, purpose) } catch AIError.http(400, _) {}
+        // Older models don't take a schema: plain JSON mode.
+        body["generationConfig"] = ["responseMimeType": "application/json"]
+        return try await send(model, body, purpose)
+    }
+
+    private func send(_ model: String, _ body: [String: Any], _ purpose: AIPurpose) async throws -> String {
+        let path = model.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? model
+        var req = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(path):generateContent")!)
         req.httpMethod = "POST"
         req.timeoutInterval = purpose == .check ? 30 : 90
         req.setValue("application/json", forHTTPHeaderField: "content-type")
-        req.setValue("Bearer \(key)", forHTTPHeaderField: "authorization")
+        req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, resp) = try await URLSession.shared.data(for: req)
@@ -108,9 +170,53 @@ struct OpenAIClient: LLMClient {
             let msg = ((json?["error"] as? [String: Any])?["message"] as? String) ?? ""
             throw AIError.http(status, msg)
         }
-        let choice = (json["choices"] as? [[String: Any]])?.first
-        guard let text = (choice?["message"] as? [String: Any])?["content"] as? String, !text.isEmpty else { throw AIError.badResponse }
+        let candidate = (json["candidates"] as? [[String: Any]])?.first
+        if candidate?["finishReason"] as? String == "SAFETY" { throw AIError.refused }
+        let parts = ((candidate?["content"] as? [String: Any])?["parts"] as? [[String: Any]]) ?? []
+        // Skip "thought" parts some models include.
+        let text = parts.filter { ($0["thought"] as? Bool) != true }.compactMap { $0["text"] as? String }.joined()
+        guard !text.isEmpty else { throw AIError.badResponse }
         return text
+    }
+}
+
+// MARK: - Model lists
+
+enum ModelLister {
+    /// Models the provider offers, for the model pickers. Empty when it can't be reached.
+    static func fetch(_ provider: Provider, key: String?, ollamaURL: String) async -> [String] {
+        func get(_ url: String, headers: [String: String] = [:]) async -> [String: Any]? {
+            guard let u = URL(string: url) else { return nil }
+            var req = URLRequest(url: u)
+            req.timeoutInterval = 10
+            for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+            guard let (data, resp) = try? await URLSession.shared.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        }
+        func ids(_ json: [String: Any]?) -> [String] { (json?["data"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String } }
+
+        switch provider {
+        case .anthropic:
+            guard let key else { return [] }
+            return ids(await get("https://api.anthropic.com/v1/models?limit=100", headers: ["x-api-key": key, "anthropic-version": "2026-10-21"]))
+        case .openai:
+            guard let key else { return [] }
+            let skip = ["embedding", "whisper", "tts", "dall-e", "image", "audio", "realtime", "moderation", "transcribe", "search"]
+            return ids(await get("https://api.openai.com/v1/models", headers: ["authorization": "Bearer \(key)"]))
+                .filter { id in !skip.contains { id.contains($0) } }.sorted()
+        case .gemini:
+            guard let key else { return [] }
+            let json = await get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", headers: ["x-goog-api-key": key])
+            return (json?["models"] as? [[String: Any]] ?? [])
+                .filter { ($0["supportedGenerationMethods"] as? [String])?.contains("generateContent") == true }
+                .compactMap { ($0["name"] as? String)?.replacingOccurrences(of: "models/", with: "") }
+                .filter { $0.hasPrefix("gemini") }
+        case .openrouter:
+            return ids(await get("https://openrouter.ai/api/v1/models")).sorted()
+        case .ollama:
+            let json = await get(ollamaURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/api/tags")
+            return (json?["models"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+        }
     }
 }
 
@@ -211,10 +317,20 @@ enum AI {
             guard let m = store.model(s.localModelID), store.installed.contains(m.id) else { throw AIError.noLocalModel }
             return LocalClient(model: m, path: store.path(m).path)
         case .cloud:
+            if s.provider == .ollama {
+                let base = s.ollamaURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/v1"
+                // Local models can be slow to load the first time.
+                return OpenAIClient(baseURL: base, key: nil, checkModel: s.checkModel, chatModel: s.chatModel, timeoutScale: 4)
+            }
             guard let key = Keychain.get(s.provider) else { throw AIError.noKey }
             switch s.provider {
             case .anthropic: return AnthropicClient(key: key, checkModel: s.checkModel, chatModel: s.chatModel)
             case .openai: return OpenAIClient(key: key, checkModel: s.checkModel, chatModel: s.chatModel)
+            case .gemini: return GeminiClient(key: key, checkModel: s.checkModel, chatModel: s.chatModel)
+            case .openrouter:
+                return OpenAIClient(baseURL: "https://openrouter.ai/api/v1", key: key, checkModel: s.checkModel, chatModel: s.chatModel,
+                                    extraHeaders: ["X-Title": "Inkwell"])
+            case .ollama: throw AIError.noKey   // handled above
             }
         }
     }
@@ -224,7 +340,7 @@ enum AI {
         switch s.engine {
         case .onDevice: return OnDevice.unavailableReason == nil
         case .local: return ModelStore.shared.model(s.localModelID).map { ModelStore.shared.installed.contains($0.id) } ?? false
-        case .cloud: return Keychain.get(s.provider) != nil
+        case .cloud: return s.provider.needsKey ? Keychain.get(s.provider) != nil : !s.checkModel.isEmpty
         }
     }
 }

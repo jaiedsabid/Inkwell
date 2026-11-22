@@ -32,6 +32,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let id = CommandLine.arguments[i + 1]
             Task { let ok = await SelfTest.localTest(id); LlamaEngine.shared.shutdown(); exit(ok ? 0 : 1) }; return
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--models"), i + 1 < CommandLine.arguments.count, let p = Provider(rawValue: CommandLine.arguments[i + 1]) {
+            Task {
+                let list = await ModelLister.fetch(p, key: Keychain.get(p), ollamaURL: AppSettings.shared.ollamaURL)
+                print("\(p.label): \(list.count) models"); list.prefix(8).forEach { print("  \($0)") }
+                exit(0)
+            }
+            return
+        }
         if CommandLine.arguments.contains("--aitest") { Task { exit(await SelfTest.aiTest() ? 0 : 1) }; return }
         if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
             Snapshot.run(to: CommandLine.arguments[i + 1]); exit(0)

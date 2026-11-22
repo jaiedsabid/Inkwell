@@ -76,10 +76,35 @@ enum AX {
         role(el) == "AXSecureTextField" || subrole(el) == (kAXSecureTextFieldSubrole as String)
     }
 
+    /// Search boxes, address bars, autocomplete boxes and URL/email fields: places where people type queries, not prose.
+    static func isSearchLike(_ el: AXUIElement) -> Bool {
+        let r = role(el), sub = subrole(el)
+        if r == "AXSearchField" || sub == (kAXSearchFieldSubrole as String) || r == (kAXComboBoxRole as String) { return true }
+        let hints = ["search", "find", "filter", "query", "address", "url", "email", "e-mail", "jump to", "go to", "omnibox", "lookup"]
+        var texts = [string(el, kAXRoleDescriptionAttribute), string(el, kAXPlaceholderValueAttribute),
+                     string(el, kAXDescriptionAttribute), string(el, kAXTitleAttribute), string(el, kAXIdentifierAttribute),
+                     string(el, "AXDOMIdentifier"), string(el, kAXHelpAttribute)]
+        if let classes = raw(el, "AXDOMClassList") as? [String] { texts.append(classes.joined(separator: " ")) }
+        // A label element pointing at the field ("Search mail")
+        if let title = element(el, kAXTitleUIElementAttribute) { texts.append(string(title, kAXValueAttribute)) }
+        let joined = texts.compactMap { $0?.lowercased() }.joined(separator: " | ")
+        if hints.contains(where: { joined.contains($0) }) { return true }
+        // Text fields in a toolbar are address or search bars (browsers, Finder, Mail…).
+        if r == (kAXTextFieldRole as String) {
+            var cur = element(el, kAXParentAttribute)
+            for _ in 0..<6 {
+                guard let c = cur else { break }
+                if role(c) == (kAXToolbarRole as String) { return true }
+                cur = element(c, kAXParentAttribute)
+            }
+        }
+        return false
+    }
+
     /// A field the user can type prose into.
     static func isEditableText(_ el: AXUIElement) -> Bool {
         let r = role(el)
-        if [kAXTextFieldRole as String, kAXTextAreaRole as String, kAXComboBoxRole as String, "AXSearchField"].contains(r) {
+        if [kAXTextFieldRole as String, kAXTextAreaRole as String].contains(r) {
             return true
         }
         // contenteditable in browsers and Electron apps

@@ -14,12 +14,68 @@ enum EngineKind: String, CaseIterable, Codable, Identifiable {
 }
 
 enum Provider: String, CaseIterable, Codable, Identifiable {
-    case anthropic, openai
+    case anthropic, openai, gemini, openrouter, ollama
     var id: String { rawValue }
-    var label: String { self == .anthropic ? "Anthropic (Claude)" : "OpenAI" }
-    var defaultCheckModel: String { self == .anthropic ? "claude-haiku-5-5" : "gpt-5-mini" }
-    var defaultChatModel: String { self == .anthropic ? "claude-opus-5-5" : "gpt-5" }
-    var keyPrefixHint: String { self == .anthropic ? "sk-ant-…" : "sk-…" }
+
+    var label: String {
+        switch self {
+        case .anthropic: "Anthropic (Claude)"
+        case .openai: "OpenAI"
+        case .gemini: "Google Gemini"
+        case .openrouter: "OpenRouter"
+        case .ollama: "Ollama"
+        }
+    }
+
+    /// One line under the picker.
+    var blurb: String {
+        switch self {
+        case .anthropic: "Claude models. Get a key at console.anthropic.com."
+        case .openai: "GPT models. Get a key at platform.openai.com."
+        case .gemini: "Gemini models. Get a key at aistudio.google.com."
+        case .openrouter: "One key for hundreds of models from many companies. Get a key at openrouter.ai."
+        case .ollama: "Models running on this Mac in the Ollama app. No key needed; nothing leaves your Mac."
+        }
+    }
+
+    var needsKey: Bool { self != .ollama }
+    var isLocal: Bool { self == .ollama }
+
+    var defaultCheckModel: String {
+        switch self {
+        case .anthropic: "claude-haiku-5-5"
+        case .openai: "gpt-5-mini"
+        case .gemini: "gemini-flash-latest"
+        case .openrouter: "openrouter/auto"
+        case .ollama: ""
+        }
+    }
+
+    var defaultChatModel: String {
+        switch self {
+        case .anthropic: "claude-opus-5-5"
+        case .openai: "gpt-5"
+        case .gemini: "gemini-pro-latest"
+        case .openrouter: "openrouter/auto"
+        case .ollama: ""
+        }
+    }
+
+    var keyPrefixHint: String {
+        switch self {
+        case .anthropic: "sk-ant-…"
+        case .openai: "sk-…"
+        case .gemini: "AIza…"
+        case .openrouter: "sk-or-…"
+        case .ollama: ""
+        }
+    }
+}
+
+/// Which models to use with a provider: a fast one for live checks, a stronger one for chat.
+struct ModelChoice: Codable, Equatable {
+    var check: String
+    var chat: String
 }
 
 enum HotkeyPreset: String, CaseIterable, Codable, Identifiable {
@@ -85,14 +141,20 @@ final class AppSettings: ObservableObject {
 
     // AI
     @Published var engine: EngineKind { didSet { save("engine", engine) } }
-    @Published var provider: Provider {
-        didSet {
-            save("provider", provider)
-            if oldValue != provider { checkModel = provider.defaultCheckModel; chatModel = provider.defaultChatModel }
-        }
+    @Published var provider: Provider { didSet { save("provider", provider) } }
+    /// Model choices per provider, so switching back and forth keeps them.
+    @Published var modelChoices: [String: ModelChoice] { didSet { save("modelChoices", modelChoices) } }
+    /// Address of the Ollama server.
+    @Published var ollamaURL: String { didSet { save("ollamaURL", ollamaURL) } }
+
+    var checkModel: String {
+        get { modelChoices[provider.rawValue]?.check ?? provider.defaultCheckModel }
+        set { modelChoices[provider.rawValue, default: ModelChoice(check: provider.defaultCheckModel, chat: provider.defaultChatModel)].check = newValue }
     }
-    @Published var checkModel: String { didSet { save("checkModel", checkModel) } }
-    @Published var chatModel: String { didSet { save("chatModel", chatModel) } }
+    var chatModel: String {
+        get { modelChoices[provider.rawValue]?.chat ?? provider.defaultChatModel }
+        set { modelChoices[provider.rawValue, default: ModelChoice(check: provider.defaultCheckModel, chat: provider.defaultChatModel)].chat = newValue }
+    }
     /// The downloaded model in use (catalog id or "hf:owner/repo/file").
     @Published var localModelID: String? { didSet { save("localModelID", localModelID) } }
     /// Models added from Hugging Face by the user.
@@ -129,8 +191,14 @@ final class AppSettings: ObservableObject {
         disabledKinds = load("disabledKinds", [])
         engine = load("engine", .cloud)
         provider = load("provider", .anthropic)
-        checkModel = load("checkModel", Provider.anthropic.defaultCheckModel)
-        chatModel = load("chatModel", Provider.anthropic.defaultChatModel)
+        var choices = load("modelChoices", [String: ModelChoice]())
+        // Settings from before per-provider choices: keep the models picked for the current provider.
+        if choices.isEmpty, let check = UserDefaults.standard.data(forKey: "checkModel").flatMap({ try? JSONDecoder().decode(String.self, from: $0) }),
+           let chat = UserDefaults.standard.data(forKey: "chatModel").flatMap({ try? JSONDecoder().decode(String.self, from: $0) }) {
+            choices[load("provider", Provider.anthropic).rawValue] = ModelChoice(check: check, chat: chat)
+        }
+        modelChoices = choices
+        ollamaURL = load("ollamaURL", "http://localhost:11434")
         localModelID = load("localModelID", nil as String?)
         customModels = load("customModels", [])
     }

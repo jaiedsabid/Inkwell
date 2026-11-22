@@ -251,6 +251,8 @@ struct AIPane: View {
     @Loc private var keyDraft = ""
     @Loc private var hasKey = false
     @Loc private var testState: TestState = .idle
+    @Loc private var models: [String] = []
+    @Loc private var loadingModels = false
 
     enum TestState: Equatable { case idle, running, ok, failed(String) }
 
@@ -262,7 +264,8 @@ struct AIPane: View {
                 }
                 .pickerStyle(.segmented)
                 Text(settings.engine == .cloud
-                     ? "Best quality. Your text is sent to the provider you choose, using your own API key."
+                     ? (settings.provider.isLocal ? "Uses models running in Ollama on this Mac. Nothing leaves your computer."
+                                                  : "Best quality. Your text is sent to the provider you choose, using your own API key.")
                      : settings.engine == .local
                      ? "Download a free model from Hugging Face and run it on this Mac. Private and works offline."
                      : "Uses Apple's built-in model (macOS 26 with Apple Intelligence). Nothing to download.")
@@ -270,16 +273,38 @@ struct AIPane: View {
             }
 
             if settings.engine == .cloud {
-                Section("Provider") {
+                Section {
                     Picker("Provider", selection: $settings.provider) {
                         ForEach(Provider.allCases) { Text($0.label).tag($0) }
                     }
-                    LabeledContent("API key") {
-                        HStack {
-                            SecureField(hasKey ? "Saved in Keychain" : settings.provider.keyPrefixHint, text: $keyDraft)
-                                .textFieldStyle(.roundedBorder).labelsHidden().frame(width: 240)
-                            Button("Save") { save() }.disabled(keyDraft.isEmpty)
-                            if hasKey { Button("Remove") { Keychain.set(nil, for: settings.provider); refreshKey() } }
+                    Text(settings.provider.blurb).font(.callout).foregroundStyle(.secondary)
+                    if settings.provider.needsKey {
+                        LabeledContent("API key") {
+                            HStack {
+                                SecureField(hasKey ? "Saved in Keychain" : settings.provider.keyPrefixHint, text: $keyDraft)
+                                    .textFieldStyle(.roundedBorder).labelsHidden().frame(width: 240)
+                                Button("Save") { save() }.disabled(keyDraft.isEmpty)
+                                if hasKey { Button("Remove") { Keychain.set(nil, for: settings.provider); refreshKey() } }
+                            }
+                        }
+                    } else {
+                        LabeledContent("Ollama address") {
+                            HStack {
+                                TextField("", text: $settings.ollamaURL, prompt: Text("http://localhost:11434"))
+                                    .textFieldStyle(.roundedBorder).labelsHidden().frame(width: 220)
+                                    .onSubmit { loadModels() }
+                                Button("Connect") { loadModels() }
+                            }
+                        }
+                        if !loadingModels && models.isEmpty {
+                            HStack {
+                                Label("Ollama isn't running, or has no models yet.", systemImage: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange).font(.callout)
+                                Spacer()
+                                Link("Get Ollama", destination: URL(string: "https://ollama.com/download")!)
+                            }
+                            Text("Install Ollama, then in Terminal run for example  ollama pull gemma3  and click Connect.")
+                                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         }
                     }
                     LabeledContent("Connection") {
@@ -290,21 +315,33 @@ struct AIPane: View {
                             case .ok: Label("Working", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                             case .failed(let msg): Text(msg).font(.caption).foregroundStyle(.red).lineLimit(2)
                             }
-                            Button("Test") { test() }.disabled(!hasKey || testState == .running)
+                            Button("Test") { test() }.disabled((settings.provider.needsKey && !hasKey) || testState == .running)
                         }
                     }
+                } header: {
+                    Text("Provider")
                 }
                 Section {
-                    TextField("Live checking", text: $settings.checkModel)
-                    TextField("Chat and rewrites", text: $settings.chatModel)
-                    Button("Use recommended models") {
-                        settings.checkModel = settings.provider.defaultCheckModel
-                        settings.chatModel = settings.provider.defaultChatModel
+                    ModelField(title: "Live checking", detail: "Runs often: pick a fast, low-cost model.",
+                               value: Binding(get: { settings.checkModel }, set: { settings.checkModel = $0 }), options: models, loading: loadingModels)
+                    ModelField(title: "Chat and rewrites", detail: "Pick a stronger model.",
+                               value: Binding(get: { settings.chatModel }, set: { settings.chatModel = $0 }), options: models, loading: loadingModels)
+                    HStack {
+                        if !settings.provider.defaultCheckModel.isEmpty {
+                            Button("Use recommended models") {
+                                settings.checkModel = settings.provider.defaultCheckModel
+                                settings.chatModel = settings.provider.defaultChatModel
+                            }
+                        }
+                        Spacer()
+                        Button { loadModels() } label: { Label("Refresh list", systemImage: "arrow.clockwise") }
+                            .disabled(loadingModels || (settings.provider.needsKey && !hasKey && settings.provider != .openrouter))
                     }
                 } header: {
                     Text("Models")
                 } footer: {
-                    Text("Live checking runs often, so a fast, low-cost model works best. Rewrites use a stronger model.")
+                    Text(models.isEmpty ? "Type a model name, or add your key to choose from the provider's list."
+                                        : "\(models.count) models available from \(settings.provider.label).")
                 }
             } else if settings.engine == .local {
                 LocalModelsSection()
@@ -320,8 +357,8 @@ struct AIPane: View {
                 }
             }
         }
-        .onAppear(perform: refreshKey)
-        .onChange(of: settings.provider) { _, _ in refreshKey(); testState = .idle }
+        .onAppear { refreshKey(); loadModels() }
+        .onChange(of: settings.provider) { _, _ in refreshKey(); testState = .idle; models = []; loadModels() }
     }
 
     private func refreshKey() { hasKey = Keychain.get(settings.provider) != nil; keyDraft = "" }
@@ -330,7 +367,27 @@ struct AIPane: View {
         Keychain.set(keyDraft, for: settings.provider)
         refreshKey()
         test()
+        loadModels()
         Coordinator.shared.checker.invalidate()
+    }
+
+    private func loadModels() {
+        guard settings.engine == .cloud else { return }
+        let provider = settings.provider
+        let key = Keychain.get(provider)
+        if provider.needsKey && key == nil && provider != .openrouter { models = []; return }
+        loadingModels = true
+        Task {
+            let list = await ModelLister.fetch(provider, key: key, ollamaURL: settings.ollamaURL)
+            guard provider == settings.provider else { return }
+            models = list
+            loadingModels = false
+            // Ollama has no defaults: start with the first installed model.
+            if provider == .ollama, let first = list.first {
+                if settings.checkModel.isEmpty { settings.checkModel = first }
+                if settings.chatModel.isEmpty { settings.chatModel = first }
+            }
+        }
     }
 
     private func test() {
@@ -493,7 +550,7 @@ struct PrivacyPane: View {
                 PrivacyRow(symbol: "lock.fill", title: "Password fields are never read", detail: "Secure fields are skipped in every app.")
                 PrivacyRow(symbol: "hand.raised.fill", title: "Off in password managers and terminals", detail: "Change this in Apps & Websites.")
                 PrivacyRow(symbol: "internaldrive", title: "Spelling is checked on your Mac",
-                           detail: settings.engine != .cloud
+                           detail: settings.engine != .cloud || settings.provider.isLocal
                                ? "Grammar and rewrites also run on your Mac. Nothing is sent anywhere."
                                : "For grammar and rewrites, only the sentences being checked are sent to \(settings.provider.label), using your key. Inkwell has no servers and keeps no copy.")
                 PrivacyRow(symbol: "key.fill", title: "Your API key stays in the Keychain", detail: "It's only sent to your provider.")
@@ -696,5 +753,63 @@ struct ToneEditor: View {
             }
             previewing = false
         }
+    }
+}
+
+/// A model name: typed in, or picked from the provider's list (searchable when long).
+struct ModelField: View {
+    var title: String
+    var detail: String
+    @Binding var value: String
+    var options: [String]
+    var loading: Bool
+    @Loc private var showList = false
+    @Loc private var search = ""
+
+    var body: some View {
+        LabeledContent {
+            HStack(spacing: 6) {
+                TextField("", text: $value, prompt: Text("model name")).textFieldStyle(.roundedBorder).labelsHidden().frame(width: 230)
+                if loading {
+                    ProgressView().controlSize(.small)
+                } else if !options.isEmpty {
+                    Button { search = ""; showList = true } label: { Image(systemName: "chevron.up.chevron.down") }
+                        .help("Choose from the list")
+                        .popover(isPresented: $showList, arrowEdge: .bottom) { list }
+                }
+            }
+        } label: {
+            Text(title)
+            Text(detail)
+        }
+    }
+
+    private var list: some View {
+        VStack(spacing: 0) {
+            if options.count > 12 {
+                TextField("", text: $search, prompt: Text("Search models")).textFieldStyle(.roundedBorder).labelsHidden().padding(8)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(options.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { m in
+                        Button {
+                            value = m
+                            showList = false
+                        } label: {
+                            HStack {
+                                Text(m).lineLimit(1)
+                                Spacer()
+                                if m == value { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(maxHeight: 320)
+        }
+        .frame(width: 320)
     }
 }

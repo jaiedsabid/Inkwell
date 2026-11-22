@@ -25,6 +25,8 @@ final class Coordinator: ObservableObject {
     private var seenIssues = Set<String>()
     private var timer: Timer?
     private var tickCount = 0
+    /// Whether the focused field is a search/address box, worked out once per field.
+    private var searchCache: (element: AXUIElement, result: Bool)?
     /// Underlines already drawn, by content (so they follow their word as text shifts).
     private var shownKeys = Set<String>()
     /// First measurement of underlines not drawn yet; drawn once a second measurement agrees.
@@ -127,6 +129,12 @@ final class Coordinator: ObservableObject {
         guard let el = AX.focusedElement() else { Log.write("\(app): no focused element"); return stop(.idle) }
         let role = AX.role(el)
         guard !AX.isSecure(el) else { Log.write("\(app): secure field skipped"); return stop(.idle) }
+        let searchLike: Bool
+        if let c = searchCache, CFEqual(c.element, el) { searchLike = c.result } else {
+            searchLike = AX.isSearchLike(el)
+            searchCache = (el, searchLike)
+        }
+        guard !searchLike else { Log.write("\(app): search or address field skipped"); return stop(.idle) }
         guard AX.isEditableText(el) else {
             Log.write("\(app): focused \(role)/\(AX.subrole(el)) is not editable text (pid \(AX.pid(el) ?? -1) vs \(front.processIdentifier))")
             return stop(.idle)

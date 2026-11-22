@@ -129,7 +129,7 @@ struct OnboardingView: View {
         VStack(spacing: 20) {
             hero("cpu", "Choose your AI", "Spelling works offline right away. Grammar, rewrites and chat need an AI.")
             HStack(spacing: 12) {
-                EngineCard(selected: settings.engine == .cloud, symbol: "cloud", title: "Cloud AI", detail: "Best quality. Uses your own Anthropic or OpenAI key.") { settings.engine = .cloud }
+                EngineCard(selected: settings.engine == .cloud, symbol: "cloud", title: "Cloud AI", detail: "Best quality. Claude, GPT, Gemini, OpenRouter or Ollama.") { settings.engine = .cloud }
                 EngineCard(selected: settings.engine == .local, symbol: "arrow.down.circle", title: "Local model",
                            detail: "Free and private. Download a model like Gemma 4 from Hugging Face.") { settings.engine = .local }
                 EngineCard(selected: settings.engine == .onDevice, symbol: "apple.logo", title: "Apple",
@@ -158,9 +158,13 @@ struct OnboardingView: View {
                     Picker("Provider", selection: $settings.provider) {
                         ForEach(Provider.allCases) { Text($0.label).tag($0) }
                     }
-                    .pickerStyle(.segmented).labelsHidden()
-                    SecureField("Paste your API key (\(settings.provider.keyPrefixHint))", text: $keyDraft).textFieldStyle(.roundedBorder)
-                    Text("Stored in your Mac's Keychain. You pay your provider directly for what you use.").font(.caption).foregroundStyle(.secondary)
+                    .pickerStyle(.menu).labelsHidden()
+                    if settings.provider.needsKey {
+                        SecureField("Paste your API key (\(settings.provider.keyPrefixHint))", text: $keyDraft).textFieldStyle(.roundedBorder)
+                        Text("Stored in your Mac's Keychain. You pay your provider directly for what you use.").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text(settings.provider.blurb + " Pick a model in Settings → AI Engine after setup.").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: 460)
             }
