@@ -1,0 +1,205 @@
+import Combine
+import SwiftUI
+
+struct OnboardingView: View {
+    @ObservedObject var settings = AppSettings.shared
+    @Loc private var step = 0
+    @Loc private var trusted = AX.isTrusted
+    @Loc private var keyDraft = ""
+    var finish: () -> Void
+    private let poll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let steps = 5
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Group {
+                switch step {
+                case 0: welcome
+                case 1: permission
+                case 2: writing
+                case 3: engine
+                default: done
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.horizontal, 40).padding(.top, 36)
+            .transition(.opacity)
+
+            HStack {
+                HStack(spacing: 6) {
+                    ForEach(0..<steps, id: \.self) { i in
+                        Capsule().fill(i == step ? Theme.accent : Color.secondary.opacity(0.25)).frame(width: i == step ? 18 : 6, height: 6)
+                    }
+                }
+                Spacer()
+                if step > 0 && step < steps - 1 { Button("Back") { withAnimation { step -= 1 } }.buttonStyle(.bordered) }
+                primaryButton
+            }
+            .padding(20)
+        }
+        .frame(width: 600, height: 500)
+        .onReceive(poll) { _ in trusted = AX.isTrusted }
+    }
+
+    @ViewBuilder
+    private var primaryButton: some View {
+        switch step {
+        case 1:
+            if trusted { next("Continue") } else { Button("Skip for now") { withAnimation { step += 1 } }.buttonStyle(.bordered) }
+        case 3:
+            next(settings.engine == .cloud && keyDraft.isEmpty && Keychain.get(settings.provider) == nil ? "Skip for now" : "Continue") {
+                if !keyDraft.isEmpty { Keychain.set(keyDraft, for: settings.provider) }
+            }
+        case steps - 1:
+            Button("Start writing") { settings.onboarded = true; finish() }
+                .buttonStyle(.borderedProminent).tint(Theme.accent).keyboardShortcut(.defaultAction)
+        default: next(step == 0 ? "Get started" : "Continue")
+        }
+    }
+
+    private func next(_ title: String, before: @escaping () -> Void = {}) -> some View {
+        Button(title) { before(); withAnimation { step += 1 } }
+            .buttonStyle(.borderedProminent).tint(Theme.accent).keyboardShortcut(.defaultAction)
+    }
+
+    private func hero(_ symbol: String, _ title: String, _ subtitle: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 30, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 64, height: 64)
+                .background(Theme.accent.gradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Text(title).font(.system(size: 24, weight: .bold))
+            Text(subtitle).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var welcome: some View {
+        VStack(spacing: 26) {
+            hero("pencil.line", "Write better, everywhere", "Inkwell checks your writing in every app: browsers, Slack, Mail, Notes and more.")
+            VStack(alignment: .leading, spacing: 14) {
+                Feature(symbol: "scribble", color: Theme.red, title: "Fix mistakes as you type", detail: "Red lines mark mistakes. Hover to see the fix, click to apply.")
+                Feature(symbol: "text.line.first.and.arrowtriangle.forward", color: Theme.blue, title: "Clearer sentences", detail: "Blue lines suggest a better way to say a whole sentence.")
+                Feature(symbol: "sparkles", color: Theme.purple, title: "Ask for any change", detail: "Select text, press \(settings.hotkey.label), and say what you want.")
+            }
+            .frame(maxWidth: 420)
+        }
+    }
+
+    private var permission: some View {
+        VStack(spacing: 22) {
+            hero("lock.shield", "Allow Inkwell to see what you type",
+                 "macOS asks for Accessibility access. Inkwell uses it only to read the text field you're typing in and to apply fixes you accept.")
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Password fields are never read", systemImage: "checkmark.shield")
+                Label("You can turn Inkwell off for any app", systemImage: "checkmark.shield")
+            }
+            .foregroundStyle(.secondary)
+            if trusted {
+                Label("Access allowed", systemImage: "checkmark.circle.fill").font(.headline).foregroundStyle(.green)
+            } else {
+                VStack(spacing: 8) {
+                    Button("Open System Settings") { AX.requestTrust(); AX.openAccessibilitySettings() }
+                        .buttonStyle(.borderedProminent).tint(Theme.accent).controlSize(.large)
+                    Text("Turn on Inkwell in the list, then come back here.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var writing: some View {
+        VStack(spacing: 22) {
+            hero("textformat", "How do you write?", "You can change these any time from the menu bar.")
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("Main language").fontWeight(.medium)
+                    Spacer()
+                    LanguagePicker(code: $settings.languageCode).labelsHidden().fixedSize()
+                }
+                Text("Default tone").fontWeight(.medium)
+                ToneGrid(selection: $settings.tone)
+                Text(settings.tone.guidance).font(.callout).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: 440)
+        }
+    }
+
+    private var engine: some View {
+        VStack(spacing: 20) {
+            hero("cpu", "Choose your AI", "Spelling works offline right away. Grammar, rewrites and chat need an AI.")
+            HStack(spacing: 12) {
+                EngineCard(selected: settings.engine == .cloud, symbol: "cloud", title: "Cloud AI", detail: "Best quality. Uses your own Anthropic or OpenAI key.") { settings.engine = .cloud }
+                EngineCard(selected: settings.engine == .onDevice, symbol: "lock.laptopcomputer", title: "On-device",
+                           detail: OnDevice.unavailableReason.map { "Not available: \($0)." } ?? "Private. Nothing leaves your Mac.") { settings.engine = .onDevice }
+                    .disabled(!OnDevice.isSupportedOS)
+            }
+            .frame(maxWidth: 460)
+            if settings.engine == .cloud {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("Provider", selection: $settings.provider) {
+                        ForEach(Provider.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    SecureField("Paste your API key (\(settings.provider.keyPrefixHint))", text: $keyDraft).textFieldStyle(.roundedBorder)
+                    Text("Stored in your Mac's Keychain. You pay your provider directly for what you use.").font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: 460)
+            }
+        }
+    }
+
+    private var done: some View {
+        VStack(spacing: 24) {
+            hero("checkmark", "You're all set", "Inkwell lives in your menu bar. Click into any text field and start typing.")
+            VStack(alignment: .leading, spacing: 14) {
+                Feature(symbol: "cursorarrow.rays", color: Theme.red, title: "Hover a line", detail: "See the fix and click Accept.")
+                Feature(symbol: "keyboard", color: Theme.purple, title: "Press \(settings.hotkey.label)", detail: "With text selected, to rewrite it. With nothing selected, to write something new.")
+                Feature(symbol: "menubar.arrow.up.rectangle", color: Theme.blue, title: "Menu bar icon", detail: "Turn Inkwell on or off, pause it, and change tone or language.")
+            }
+            .frame(maxWidth: 420)
+        }
+    }
+}
+
+struct Feature: View {
+    var symbol: String
+    var color: NSColor
+    var title: String
+    var detail: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(nsColor: color)).frame(width: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).fontWeight(.semibold)
+                Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+struct EngineCard: View {
+    var selected: Bool
+    var symbol: String
+    var title: String
+    var detail: String
+    var action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: symbol).font(.system(size: 16, weight: .semibold))
+                    Spacer()
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle").foregroundStyle(selected ? Theme.accent : .secondary)
+                }
+                Text(title).fontWeight(.semibold)
+                Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+            .background(.quaternary.opacity(selected ? 0.9 : 0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(selected ? Theme.accent : .clear, lineWidth: 2))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
