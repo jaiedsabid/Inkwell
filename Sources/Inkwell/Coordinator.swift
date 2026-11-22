@@ -128,7 +128,7 @@ final class Coordinator: ObservableObject {
         guard let front = NSWorkspace.shared.frontmostApplication else { return stop(.idle) }
         // Our own panels (chat, settings) keep the last field as it was.
         if front.processIdentifier == ProcessInfo.processInfo.processIdentifier { return }
-        frontApp = front
+        if frontApp != front { frontApp = front }   // published: assign only on change, or every view redraws 4× a second
         AX.prepare(app: front)
 
         let app = front.bundleIdentifier ?? "?"
@@ -150,7 +150,8 @@ final class Coordinator: ObservableObject {
         if element == nil || !CFEqual(element!, el) {
             element = el
             lastValue = nil
-            host = AX.pageURL(el)?.host
+            let h = AX.pageURL(el)?.host
+            if host != h { host = h }
             checker.reset()
             checker.appBundleID = front.bundleIdentifier
             seenIssues = []
@@ -159,14 +160,15 @@ final class Coordinator: ObservableObject {
             lastWordCount = -1
             card.hide()
         } else if tickCount % 8 == 0 {
-            host = AX.pageURL(el)?.host
+            let h = AX.pageURL(el)?.host
+            if host != h { host = h }
         }
         if settings.isDisabled(app: front.bundleIdentifier, host: host) {
             stopChecking()
             if state != .disabled(app: host ?? appName) { state = .disabled(app: host ?? appName) }
             return
         }
-        state = .watching(app: appName)
+        if state != .watching(app: appName) { state = .watching(app: appName) }
 
         let value = AX.value(el) ?? ""
         Log.write("\(app): watching \(role), \(checker.issues.count) issues, ai \(checker.status)")
@@ -189,7 +191,7 @@ final class Coordinator: ObservableObject {
         if state != s { state = s }
         if element != nil {
             element = nil
-            host = nil
+            if host != nil { host = nil }
         }
         stopChecking()
     }
@@ -253,7 +255,7 @@ final class Coordinator: ObservableObject {
             keys.insert(key)
             // Apps can report a word's old position for a moment after the text changes. Draw a new underline only
             // when two measurements agree, so it doesn't appear in the wrong place and then jump.
-            Log.write("measure \(issue.original): \(rects.map { "(\(Int($0.minX)),\(Int($0.minY)) w\(Int($0.width)))" }.joined())", key: "m-\(key)")
+            Log.write("measure \(issue.kind.rawValue) at \(issue.range.location)+\(issue.range.length): \(rects.map { "(\(Int($0.minX)),\(Int($0.minY)) w\(Int($0.width)))" }.joined())", key: "m-\(key)")
             let stable = shownKeys.contains(key) || pendingRects[key].map { Self.same($0, rects) } == true
             if stable {
                 shownKeys.insert(key)

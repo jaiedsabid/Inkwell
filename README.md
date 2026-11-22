@@ -123,9 +123,15 @@ Spelling and the instant checks work with no AI at all. For grammar, clarity, re
 5. The welcome window walks you through allowing Inkwell under **System Settings → Privacy & Security → Accessibility**. That is what lets it read the field you're typing in and apply fixes.
 6. Pick an AI in **Settings → AI Engine**. The local model Inkwell recommends is a good start.
 
+**Don't see the menu bar icon?** On a MacBook with a notch, macOS hides menu bar icons when the app in front has a long menu row. Open Inkwell again from Applications or Spotlight to bring up its settings, or switch to an app with fewer menus.
+
 ### Updates
 
 Inkwell doesn't update itself yet. To hear about new versions, click **Watch → Custom → Releases** on this repository, then download the new DMG and replace the app. Your settings, dictionary and models are kept.
+
+### Uninstall
+
+Quit Inkwell from its menu, drag it from Applications to the Trash, and if you like remove its data: `~/Library/Application Support/Inkwell` (downloaded models and stats), `~/Library/Preferences/app.inkwell.mac.plist` and `~/Library/Logs/Inkwell.log`. API keys are in Keychain Access under "app.inkwell.mac.apikey".
 
 ## Privacy
 

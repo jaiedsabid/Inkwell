@@ -10,6 +10,14 @@ enum Log {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss.SSS"; return f
     }()
 
+    /// Logs from before 0.1.1 could hold flagged words; delete them once.
+    static func removeOldFormat() {
+        let d = UserDefaults.standard
+        guard d.integer(forKey: "logFormat") < 2 else { return }
+        try? FileManager.default.removeItem(at: url)
+        d.set(2, forKey: "logFormat")
+    }
+
     /// Writes `message` unless it's the same as the previous line with the same `key`.
     static func write(_ message: String, key: String = "main") {
         guard message != last[key] else { return }

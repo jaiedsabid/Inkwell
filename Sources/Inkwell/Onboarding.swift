@@ -3,6 +3,7 @@ import SwiftUI
 
 struct OnboardingView: View {
     @ObservedObject var settings = AppSettings.shared
+    @ObservedObject private var hotkey = Hotkey.shared
     @Loc private var step = 0
     @Loc private var trusted = AX.isTrusted
     @Loc private var keyDraft = ""
@@ -85,6 +86,7 @@ struct OnboardingView: View {
                 Feature(symbol: "scribble", color: Theme.red, title: "Fix mistakes as you type", detail: "Red lines mark mistakes. Hover to see the fix, click to apply.")
                 Feature(symbol: "text.line.first.and.arrowtriangle.forward", color: Theme.blue, title: "Clearer sentences", detail: "Blue lines suggest a better way to say a whole sentence.")
                 Feature(symbol: "sparkles", color: Theme.purple, title: "Ask for any change", detail: "Select text, press \(settings.hotkey.label), and say what you want.")
+                Feature(symbol: "text.append", color: Theme.accentNS, title: "Finish your sentences", detail: "Gray suggestions appear as you type. Press Tab to accept.")
             }
             .frame(maxWidth: 420)
         }
@@ -181,9 +183,29 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Feature(symbol: "cursorarrow.rays", color: Theme.red, title: "Hover a line", detail: "See the fix and click Accept.")
                 Feature(symbol: "keyboard", color: Theme.purple, title: "Press \(settings.hotkey.label)", detail: "With text selected, to rewrite it. With nothing selected, to write something new.")
+                Feature(symbol: "text.append", color: Theme.accentNS, title: "Press Tab", detail: "To accept a gray suggestion. Esc hides it.")
                 Feature(symbol: "menubar.arrow.up.rectangle", color: Theme.blue, title: "Menu bar icon", detail: "Turn Inkwell on or off, pause it, and change tone or language.")
             }
             .frame(maxWidth: 420)
+            VStack(spacing: 10) {
+                if hotkey.taken || hotkey.likelyClash(for: settings.hotkey) != nil {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text(hotkey.taken ? "\(settings.hotkey.label) is used by another app. Pick a different shortcut:"
+                                          : "\(hotkey.likelyClash(for: settings.hotkey) ?? "Another app") may also use \(settings.hotkey.label). You can pick another:")
+                            .font(.callout).fixedSize(horizontal: false, vertical: true)
+                        ShortcutRecorder(shortcut: $settings.hotkey)
+                    }
+                }
+                Toggle("Open Inkwell when I log in", isOn: Binding(get: { settings.launchAtLogin }, set: { settings.launchAtLogin = $0 }))
+                    .toggleStyle(.checkbox)
+            }
+            .frame(maxWidth: 460)
+            .onAppear {
+                // A menu bar app should come back after a restart: on by default, shown here so it's easy to untick.
+                let d = UserDefaults.standard
+                if !d.bool(forKey: "offeredLoginItem") { d.set(true, forKey: "offeredLoginItem"); settings.launchAtLogin = true }
+            }
         }
     }
 }

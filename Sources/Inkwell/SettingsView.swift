@@ -477,7 +477,7 @@ struct AppsPane: View {
                         }
                         .labelsHidden().fixedSize()
                         .disabled(settings.disabledApps.contains(app.id))
-                        Toggle("", isOn: Binding(
+                        Toggle("Check in \(app.name)", isOn: Binding(
                             get: { !settings.disabledApps.contains(app.id) },
                             set: { if $0 { settings.disabledApps.remove(app.id) } else { settings.disabledApps.insert(app.id) } }))
                             .toggleStyle(.switch).labelsHidden().controlSize(.small)
@@ -849,6 +849,7 @@ struct ModelField: View {
 struct ShortcutRecorder: View {
     @Binding var shortcut: Shortcut
     @StateObject private var rec = ShortcutRecording()
+    @ObservedObject private var hotkey = Hotkey.shared
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
@@ -878,6 +879,11 @@ struct ShortcutRecorder: View {
                 .help(rec.recording ? "Press Esc to cancel" : "Click to change")
             }
             if let error = rec.error { Text(error).font(.caption).foregroundStyle(.red) }
+            else if hotkey.taken && !rec.recording {
+                Text("Another app uses this shortcut. Click it to choose a different one.").font(.caption).foregroundStyle(.orange)
+            } else if let other = hotkey.likelyClash(for: shortcut), !rec.recording {
+                Text("\(other) may also use this shortcut.").font(.caption).foregroundStyle(.orange)
+            }
         }
         .onDisappear { rec.stop() }
     }

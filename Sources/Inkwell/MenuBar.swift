@@ -63,6 +63,7 @@ struct MenuContent: View {
     @ObservedObject var coordinator = Coordinator.shared
     @ObservedObject var checker = Coordinator.shared.checker
     @ObservedObject var stats = Stats.shared
+    @ObservedObject var hotkey = Hotkey.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -100,6 +101,7 @@ struct MenuContent: View {
                 BrandGlyph(size: 20).foregroundStyle(.white.opacity(settings.isActive ? 1 : 0.8))
             }
             .frame(width: 32, height: 32)
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Inkwell").font(.system(size: 14, weight: .semibold))
@@ -109,7 +111,7 @@ struct MenuContent: View {
                 }
             }
             Spacer(minLength: 8)
-            Toggle("", isOn: Binding(get: { settings.enabled }, set: { settings.enabled = $0; if $0 { settings.pausedUntil = nil } }))
+            Toggle("Check writing everywhere", isOn: Binding(get: { settings.enabled }, set: { settings.enabled = $0; if $0 { settings.pausedUntil = nil } }))
                 .toggleStyle(.switch).labelsHidden().controlSize(.small)
                 .help(settings.enabled ? "Turn Inkwell off everywhere" : "Turn Inkwell on")
         }
@@ -174,6 +176,19 @@ struct MenuContent: View {
                 closeMenu(); AppDelegate.shared?.showOnboarding()
             }
         }
+        if hotkey.taken {
+            return Notice(symbol: "keyboard", color: .orange,
+                          text: "\(settings.hotkey.label) is used by another app, so Improve selected text can't open with it.", button: "Change") {
+                closeMenu(); AppDelegate.shared?.showSettings(.general)
+            }
+        }
+        if let other = hotkey.likelyClash(for: settings.hotkey) {
+            return Notice(symbol: "keyboard", color: .orange,
+                          text: "\(other) may also use \(settings.hotkey.label). If Improve selected text doesn't open, pick another shortcut.",
+                          button: "Change", dismiss: { hotkey.dismissClash(other) }) {
+                closeMenu(); AppDelegate.shared?.showSettings(.general)
+            }
+        }
         if !AI.isConfigured {
             return Notice(symbol: "sparkles", color: Theme.accent, text: setupText, button: "Set up") {
                 closeMenu(); AppDelegate.shared?.showSettings(.ai)
@@ -202,7 +217,7 @@ struct MenuContent: View {
                     if let icon = app.icon { Image(nsImage: icon).resizable().frame(width: 18, height: 18) }
                     Text(app.localizedName ?? "This app").fontWeight(.medium).lineLimit(1)
                 } trailing: {
-                    Toggle("", isOn: Binding(get: { on }, set: { coordinator.setChecking($0, app: true) }))
+                    Toggle("Check in \(app.localizedName ?? "this app")", isOn: Binding(get: { on }, set: { coordinator.setChecking($0, app: true) }))
                         .toggleStyle(.switch).labelsHidden().controlSize(.mini)
                         .help(on ? "Stop checking in this app" : "Check this app")
                 }
@@ -222,7 +237,7 @@ struct MenuContent: View {
                             Image(systemName: "globe").foregroundStyle(.secondary).frame(width: 18)
                             Text(site).lineLimit(1).truncationMode(.middle)
                         } trailing: {
-                            Toggle("", isOn: Binding(get: { siteOn }, set: { coordinator.setChecking($0, app: false) }))
+                            Toggle("Check on \(site)", isOn: Binding(get: { siteOn }, set: { coordinator.setChecking($0, app: false) }))
                                 .toggleStyle(.switch).labelsHidden().controlSize(.mini)
                         }
                     }
@@ -262,7 +277,7 @@ struct MenuContent: View {
             Row {
                 Text("Suggest next words").foregroundStyle(.secondary)
             } trailing: {
-                Toggle("", isOn: $settings.autocomplete).toggleStyle(.switch).labelsHidden().controlSize(.mini)
+                Toggle("Suggest next words", isOn: $settings.autocomplete).toggleStyle(.switch).labelsHidden().controlSize(.mini)
             }
         }
         .background(Card())
@@ -289,6 +304,7 @@ struct MenuContent: View {
             }
             .buttonStyle(.plain)
             .help("See your writing stats")
+            .accessibilityLabel("Writing stats")
             .padding(.bottom, -6)
             .padding(.trailing, 4)
         }
@@ -317,6 +333,8 @@ struct MenuContent: View {
             }
         }
         .buttonStyle(PrimaryButtonStyle(fullWidth: true))
+        .accessibilityLabel("Improve selected text")
+        .accessibilityHint("Shortcut \(settings.hotkey.label)")
     }
 
     // MARK: Footer
@@ -391,9 +409,10 @@ struct MenuLabel: View {
     var symbol: String? = nil
     var body: some View {
         HStack(spacing: 4) {
-            if let symbol { Image(systemName: symbol).font(.system(size: 11)) }
+            if let symbol { Image(systemName: symbol).font(.system(size: 11)).accessibilityHidden(true) }
             Text(text).lineLimit(1)
             Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
         }
         .font(.system(size: 12.5))
         .padding(.horizontal, 8).padding(.vertical, 4)
@@ -477,6 +496,7 @@ private struct FooterButton: View {
     var body: some View {
         Button(action: action) { FooterLabel(symbol: symbol, text: text) }
             .buttonStyle(.plain)
+            .accessibilityLabel(text)
     }
 }
 
@@ -485,6 +505,8 @@ struct Notice: View {
     var color: Color
     var text: String
     var button: String
+    /// Shows a small close button; for notices the user may know don't apply.
+    var dismiss: (() -> Void)? = nil
     var action: () -> Void
 
     var body: some View {
@@ -495,6 +517,10 @@ struct Notice: View {
             Text(text).font(.system(size: 11.5)).foregroundStyle(.primary.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             Button(button, action: action).buttonStyle(SecondaryButtonStyle())
+            if let dismiss {
+                Button(action: dismiss) { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary) }
+                    .buttonStyle(.plain).help("It works fine, don't show this again").accessibilityLabel("Dismiss")
+            }
         }
         .padding(10)
         .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))

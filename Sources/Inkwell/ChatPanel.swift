@@ -194,6 +194,7 @@ struct ChatView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             Button(action: close) { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary).font(.system(size: 15)) }
+                .accessibilityLabel("Close")
                 .buttonStyle(.plain)
                 .help("Close (esc)")
         }
@@ -341,6 +342,7 @@ struct ChatView: View {
                 Image(systemName: "arrow.up.circle.fill").font(.system(size: 22))
                     .foregroundStyle(model.input.isEmpty || model.loading ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Theme.accent))
             }
+            .accessibilityLabel("Send")
             .buttonStyle(.plain)
             .disabled(model.input.isEmpty || model.loading)
         }

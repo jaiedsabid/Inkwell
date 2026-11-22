@@ -4,6 +4,18 @@ All notable changes to Inkwell are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Fixed
+
+- The diagnostic log no longer records flagged words; logs from 0.1.0 are deleted on first launch.
+- Idle CPU use drops from about 6% to under 1% (state that didn't change no longer redraws every view four times a second).
+- VoiceOver names every switch and button in the menu bar panel, the Improve panel and the suggestion card, and skips decorative icons.
+
+### Added
+
+- A warning when the Improve shortcut is taken, or when an app that often uses ⌥ Space (Alfred, ChatGPT, Raycast, Claude) is running, with a quick way to pick another; Inkwell takes the shortcut back if the other app quits.
+- Onboarding mentions Tab suggestions and offers "Open Inkwell when I log in" (on by default, easy to untick).
+- README: what to do when the menu bar icon is hidden by the notch, and how to uninstall.
+
 ## [0.1.0] - 2026-11-22
 
 ### Added

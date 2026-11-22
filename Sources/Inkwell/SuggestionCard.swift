@@ -101,9 +101,11 @@ struct SuggestionCardView: View {
                     if model.issues.count > 1 {
                         Button { model.index = (model.index - 1 + model.issues.count) % model.issues.count } label: { Image(systemName: "chevron.left") }
                             .buttonStyle(.plain).foregroundStyle(.secondary)
+                            .accessibilityLabel("Previous suggestion")
                         Text("\(model.index + 1) of \(model.issues.count)").font(.caption).monospacedDigit().foregroundStyle(.secondary)
                         Button { model.index = (model.index + 1) % model.issues.count } label: { Image(systemName: "chevron.right") }
                             .buttonStyle(.plain).foregroundStyle(.secondary)
+                            .accessibilityLabel("Next suggestion")
                     }
                 }
 
@@ -149,6 +151,7 @@ struct SuggestionCardView: View {
                             .frame(width: 22, height: 22).contentShape(Rectangle())
                     }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .accessibilityLabel("More options")
                 }
             }
         }

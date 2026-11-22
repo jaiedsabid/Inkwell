@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Snapshot.run(to: CommandLine.arguments[i + 1]); exit(0)
         }
 
+        Log.removeOldFormat()
         let settings = AppSettings.shared
         StatusMenu.shared.install()
         Coordinator.shared.start()
@@ -50,6 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pauseTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
             MainActor.assumeIsolated {
                 if let p = settings.pausedUntil, p <= Date() { settings.pausedUntil = nil }
+                // The app holding the shortcut may have quit: try again.
+                if Hotkey.shared.taken { Hotkey.shared.resume() }
             }
         }
 
