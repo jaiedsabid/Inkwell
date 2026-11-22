@@ -9,6 +9,9 @@ final class LlamaEngine: @unchecked Sendable {
     private var model: OpaquePointer?
     private var ctx: OpaquePointer?
     private var loadedPath: String?
+    /// The prompt tokens currently held in the context's memory, so a request that starts the same way (the same
+    /// system prompt) only has to read its new part.
+    private var cachedPrompt: [llama_token] = []
     private var idleTimer: DispatchSourceTimer?
     private let contextSize: UInt32 = 4096
     /// Free the model's memory after this long without a request.
@@ -56,9 +59,8 @@ final class LlamaEngine: @unchecked Sendable {
         defer { scheduleUnload() }
         let vocab = llama_model_get_vocab(model)
 
-        var tokens = tokenize(vocab, format(model: model, system: system, messages: messages))
+        let tokens = tokenize(vocab, format(model: model, system: system, messages: messages))
         guard !tokens.isEmpty, tokens.count + maxTokens < Int(contextSize) else { throw EngineError.tooLong }
-        llama_memory_clear(llama_get_memory(ctx), true)
 
         guard let smpl = llama_sampler_chain_init(llama_sampler_chain_default_params()) else { throw EngineError.decode }
         defer { llama_sampler_free(smpl) }
@@ -72,8 +74,7 @@ final class LlamaEngine: @unchecked Sendable {
             llama_sampler_chain_add(smpl, llama_sampler_init_dist(UInt32.random(in: 1...UInt32.max)))
         }
 
-        let rc = tokens.withUnsafeMutableBufferPointer { llama_decode(ctx, llama_batch_get_one($0.baseAddress, Int32($0.count))) }
-        guard rc == 0 else { throw EngineError.decode }
+        try prefill(tokens, ctx: ctx)
 
         var out: [UInt8] = []
         for _ in 0..<maxTokens {
@@ -84,6 +85,88 @@ final class LlamaEngine: @unchecked Sendable {
             if r != 0 { break }
         }
         return String(decoding: out, as: UTF8.self)
+    }
+
+    /// Reads `tokens` into the context, reusing the start it shares with the last prompt (the same system prompt, or
+    /// the same text typed so far) and dropping everything after that, including the last reply.
+    private func prefill(_ tokens: [llama_token], ctx: OpaquePointer) throws {
+        let mem = llama_get_memory(ctx)
+        var keep = zip(tokens, cachedPrompt).prefix(while: { $0 == $1 }).count
+        keep = min(keep, tokens.count - 1)                      // decode at least one token to get fresh logits
+        if keep == 0 || !llama_memory_seq_rm(mem, 0, llama_pos(keep), -1) {
+            llama_memory_clear(mem, true)
+            keep = 0
+        }
+        cachedPrompt = []
+        var fresh = Array(tokens[keep...])
+        let rc = fresh.withUnsafeMutableBufferPointer { llama_decode(ctx, llama_batch_get_one($0.baseAddress, Int32($0.count))) }
+        guard rc == 0 else { llama_memory_clear(mem, true); throw EngineError.decode }
+        cachedPrompt = tokens
+    }
+
+    /// One generated piece of text and how likely the model thought it was (0…1).
+    struct Step { var text: String; var p: Double }
+
+    /// Continues `prompt` as plain text (no chat format), the way a keyboard predicts: always the most likely token,
+    /// with its probability. `heal` is text the output must start with (the half-typed word cut from the prompt, so
+    /// the model can pick a whole-word token); its probabilities are relative to the tokens that fit it.
+    func continueText(path: String, prompt: String, heal: String, maxTokens: Int, stop: @escaping @Sendable (String) -> Bool) async throws -> [Step] {
+        try await withCheckedThrowingContinuation { cont in
+            queue.async {
+                do { cont.resume(returning: try self.runContinue(path: path, prompt: prompt, heal: heal, maxTokens: maxTokens, stop: stop)) }
+                catch { cont.resume(throwing: error) }
+            }
+        }
+    }
+
+    private func runContinue(path: String, prompt: String, heal: String, maxTokens: Int, stop: (String) -> Bool) throws -> [Step] {
+        _ = Self.backend
+        try load(path)
+        guard let model, let ctx else { throw EngineError.load(URL(fileURLWithPath: path).lastPathComponent) }
+        defer { scheduleUnload() }
+        let vocab = llama_model_get_vocab(model)
+        let tokens = tokenize(vocab, prompt, special: false)
+        guard tokens.count > 1, tokens.count + maxTokens < Int(contextSize) else { throw EngineError.tooLong }
+        try prefill(tokens, ctx: ctx)
+
+        let nv = Int(llama_vocab_n_tokens(vocab))
+        var steps: [Step] = []
+        var text = ""
+        var remaining = heal.lowercased()
+        for _ in 0..<maxTokens {
+            guard let logits = llama_get_logits_ith(ctx, -1) else { break }
+            var best = 0
+            var maxL = -Float.infinity
+            for i in 0..<nv where logits[i] > maxL { maxL = logits[i]; best = i }
+            var sum = 0.0
+            for i in 0..<nv { sum += Double(expf(logits[i] - maxL)) }
+            var tok = llama_token(best)
+            var p = 1.0 / sum
+            if !remaining.isEmpty {
+                // Only tokens that agree with what's typed: "invo" allows " in", " invoice", not " file".
+                var fits: [(llama_token, Double, String)] = []
+                for i in 0..<nv where logits[i] > maxL - 14 {
+                    let piece = String(decoding: piece(vocab, llama_token(i)), as: UTF8.self)
+                    let l = piece.lowercased()
+                    guard !l.isEmpty, remaining.hasPrefix(l) || l.hasPrefix(remaining) else { continue }
+                    fits.append((llama_token(i), Double(expf(logits[i] - maxL)), piece))
+                }
+                guard let top = fits.max(by: { $0.1 < $1.1 }) else { break }
+                tok = top.0
+                p = top.1 / fits.reduce(0) { $0 + $1.1 }
+            }
+            if llama_vocab_is_eog(vocab, tok) { break }
+            let piece = String(decoding: piece(vocab, tok), as: UTF8.self)
+            let l = piece.lowercased()
+            remaining = remaining.hasPrefix(l) ? String(remaining.dropFirst(l.count)) : ""
+            steps.append(Step(text: piece, p: p))
+            text += piece
+            if remaining.isEmpty, stop(text) { break }
+            var t = tok
+            if withUnsafeMutablePointer(to: &t, { llama_decode(ctx, llama_batch_get_one($0, 1)) }) != 0 { break }
+        }
+        // The reply's tokens are in memory now but not in `cachedPrompt`; the next prefill drops them.
+        return steps
     }
 
     private func load(_ path: String) throws {
@@ -113,6 +196,7 @@ final class LlamaEngine: @unchecked Sendable {
         if let ctx { llama_free(ctx) }
         if let model { llama_model_free(model) }
         ctx = nil; model = nil; loadedPath = nil
+        cachedPrompt = []
     }
 
     private func scheduleUnload() {
@@ -126,11 +210,11 @@ final class LlamaEngine: @unchecked Sendable {
 
     // MARK: - Text
 
-    private func tokenize(_ vocab: OpaquePointer?, _ text: String) -> [llama_token] {
+    private func tokenize(_ vocab: OpaquePointer?, _ text: String, special: Bool = true) -> [llama_token] {
         let utf8 = Array(text.utf8CString)
         let max = Int32(utf8.count + 16)
         var tokens = [llama_token](repeating: 0, count: Int(max))
-        let n = llama_tokenize(vocab, utf8, Int32(utf8.count - 1), &tokens, max, true, true)
+        let n = llama_tokenize(vocab, utf8, Int32(utf8.count - 1), &tokens, max, true, special)
         return n > 0 ? Array(tokens.prefix(Int(n))) : []
     }
 

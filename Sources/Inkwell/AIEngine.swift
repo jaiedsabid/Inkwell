@@ -101,6 +101,8 @@ struct OpenAIClient: LLMClient {
         var msgs: [[String: Any]] = [["role": "system", "content": system]]
         msgs += messages.map { ["role": $0.role.rawValue, "content": $0.text] }
         var body: [String: Any] = ["model": model, "messages": msgs]
+        // Next-word suggestions want the most likely words. OpenAI's own reasoning models reject a temperature.
+        if purpose == .complete, !baseURL.contains("api.openai.com") { body["temperature"] = 0.2 }
         guard let schema = jsonSchema else { return try await send(body, purpose) }
 
         // Strict schema first; some models/servers only take plain JSON mode, or none.
@@ -151,7 +153,16 @@ struct GeminiClient: LLMClient {
             "contents": messages.map { ["role": $0.role == .user ? "user" : "model", "parts": [["text": $0.text]]] },
         ]
         guard let schema = jsonSchema else { return try await send(model, body, purpose) }
-        body["generationConfig"] = ["responseMimeType": "application/json", "responseJsonSchema": schema]
+        var config: [String: Any] = ["responseMimeType": "application/json", "responseJsonSchema": schema]
+        if purpose == .complete {
+            // Ghost text must arrive while the user is still paused: no thinking, and the most likely words.
+            config["temperature"] = 0.2
+            config["thinkingConfig"] = model.contains("gemini-2") ? ["thinkingBudget": 0] : ["thinkingLevel": "minimal"]
+            body["generationConfig"] = config
+            do { return try await send(model, body, purpose) } catch AIError.http(400, _) {}
+            config["thinkingConfig"] = nil
+        }
+        body["generationConfig"] = config
         do { return try await send(model, body, purpose) } catch AIError.http(400, _) {}
         // Older models don't take a schema: plain JSON mode.
         body["generationConfig"] = ["responseMimeType": "application/json"]

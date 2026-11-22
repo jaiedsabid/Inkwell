@@ -142,6 +142,29 @@ enum SelfTest {
         check(Autocomplete.clean("odel for text", after: "AI m", length: .phrase) == "odel for text", "suggestion: correct rest of word untouched")
         check(Autocomplete.clean("I wanted to say thanks", after: "I wanted to say", length: .phrase) == " thanks", "suggestion: drops repeated text")
         check(Autocomplete.clean("   ", after: "Hello there", length: .phrase).isEmpty, "suggestion: blank reply is nothing")
+        check(Autocomplete.clean("email.", after: "with limited access to", length: .phrase) == " email.", "suggestion: space between two whole words")
+        check(Autocomplete.clean("ly.", after: "Sorry for the late rep", length: .phrase) == "ly.", "suggestion: finishes a word that's also a word")
+        check(Autocomplete.pick(#"{"completion":" file","confidence":5}"#, after: "Please find the attached invo", length: .phrase).isEmpty, "suggestion: half word must finish as a real word")
+        check(Autocomplete.partialWord("the attached invo") == "invo" && Autocomplete.partialWord("Let's ") == "" && Autocomplete.partialWord("don't") == "don't", "suggestion: partial word")
+        check(Autocomplete.localWordSuggestion(before: "attached invo", completions: ["invoice", "invoices"]) == "ice"
+              && Autocomplete.localWordSuggestion(before: "Let's ask", completions: ["asking"]) == nil, "suggestion: instant word finish only for non-words")
+        check(WritingKind.detect(bundleID: "com.tinyspeck.slackmacgap", app: "Slack", window: nil) == .chat
+              && WritingKind.detect(bundleID: "com.apple.Safari", app: "Safari", window: "Inbox (3) - Gmail") == .email
+              && WritingKind.detect(bundleID: "com.apple.mail", app: "Mail", window: nil) == .email, "suggestion: writing kind")
+        check(Autocomplete.healPart("the attached invo") == " invo" && Autocomplete.healPart("Looking forward to ") == " " && Autocomplete.healPart("questions,") == "", "suggestion: heal part")
+        check(Autocomplete.pickLocal([.init(text: " invoice", p: 0.9), .init(text: " for", p: 0.8), .init(text: " the", p: 0.7)], heal: " invo", before: "attached invo", length: .phrase) == "ice"
+              && Autocomplete.pickLocal([.init(text: " long", p: 0.9), .init(text: ".", p: 0.8)], heal: "", before: "taking too", length: .phrase) == " long."
+              && Autocomplete.pickLocal([.init(text: " the", p: 0.2)], heal: "", before: "go over", length: .phrase) == "", "suggestion: local pick cuts at sure whole words")
+        check(Autocomplete.shouldStop("ice.", length: .phrase) && Autocomplete.shouldStop("hearing ", length: .word) && !Autocomplete.shouldStop("hear", length: .word), "suggestion: stop rules")
+        check(Autocomplete.looksLikeList("Groceries: eggs, milk, bread,") && !Autocomplete.looksLikeList("If you have any questions, please let me know, and")
+              && !Autocomplete.worthSuggesting("We need eggs, milk, bread, and"), "suggestion: lists skipped")
+        check(CheckPrompt.verifiedKind(.spelling, original: "waiting for", replacement: "looking forward to") == .clarity
+              && CheckPrompt.verifiedKind(.spelling, original: "recieve", replacement: "receive") == .spelling
+              && CheckPrompt.verifiedKind(.spelling, original: "then", replacement: "than") == .grammar
+              && CheckPrompt.verifiedKind(.grammar, original: "a", replacement: "an") == .grammar
+              && CheckPrompt.verifiedKind(.spelling, original: "alot", replacement: "a lot") == .spelling
+              && CheckPrompt.verifiedKind(.grammar, original: "could of", replacement: "could have") == .grammar
+              && CheckPrompt.verifiedKind(.grammar, original: "help", replacement: "assistance") == .clarity, "check: kind matches the change")
         check(Autocomplete.firstWord(of: " quick brown") == " quick" && Autocomplete.firstWord(of: "s, then") == "s,", "suggestion: first word")
         check(Autocomplete.worthSuggesting("Hello, I am writing") && !Autocomplete.worthSuggesting("Hi") && !Autocomplete.worthSuggesting("Some text here\n"), "suggestion: when to suggest")
         check(!Autocomplete.worthSuggesting("That went well. ") && !Autocomplete.worthSuggesting("That went well. We"), "suggestion: not at a new sentence")
@@ -261,16 +284,25 @@ enum SelfTest {
                                                  messages: ChatPrompt.messages(source: "hey can u send me the report by tmrw its urgent", turns: [.init(prompt: "make it professional")]),
                                                  jsonSchema: nil, purpose: .chat)
             print(String(format: "Rewrite %.1fs: %@", Date().timeIntervalSince(t), ChatPrompt.clean(chat)))
-            let samples = ["Thanks so much for your help with the", "I'm writing to let you know that the meeting", "Could you please send me",
-                           "Let me know if you have any", "Hope you're doing", "The results of the experiment suggest that", "Sorry for the late", "We are building a new AI m", "Thanks for the upd", "How they did it. Let's ask", "How they did it. Let's ask ", "We need to make sure that"]
-            for before in samples {
+            print("— Plain continuation (local engine path)")
+            for c in Self.completionCases {
                 t = Date()
-                let ctx = Autocomplete.Context(app: "Mail", window: "Re: Project update", field: "Message body")
-                let raw = try await client.complete(system: Autocomplete.prompt(length: .phrase, tone: .natural, language: "English (US)", context: ctx),
-                                                    messages: [.init(role: .user, text: "Text before the cursor:\n<<<\n\(before)\n>>>")],
+                let ctx = Autocomplete.Context(app: c.app, window: c.window, field: nil, after: c.after)
+                let s = await Autocomplete.localSuggestion(before: c.before, context: ctx, length: .phrase, path: client.path)
+                let shown = c.before.replacingOccurrences(of: "\n", with: "⏎").suffix(60)
+                print(String(format: "Local %.2fs: …%@[%@]%@", Date().timeIntervalSince(t), String(shown), s, c.after))
+            }
+            print("— Instruction prompt (cloud / on-device path)")
+            for c in Self.completionCases {
+                t = Date()
+                let ctx = Autocomplete.Context(app: c.app, window: c.window, field: nil, after: c.after)
+                let words = await Autocomplete.wordCompletions(c.before)
+                let user = Autocomplete.request(before: c.before, context: ctx, length: .phrase, tone: .natural, language: "English (US)", wordHint: words)
+                let raw = try await client.complete(system: Autocomplete.system, messages: [.init(role: .user, text: user)],
                                                     jsonSchema: Autocomplete.schema, purpose: .complete)
-                let picked = Autocomplete.pick(raw, after: before, length: .phrase)
-                print(String(format: "Suggest %.1fs: %@[%@]  (raw %@)", Date().timeIntervalSince(t), before, picked, raw.replacingOccurrences(of: "\n", with: " ")))
+                let picked = Autocomplete.pick(raw, after: c.before, length: .phrase)
+                let shown = c.before.replacingOccurrences(of: "\n", with: "⏎").suffix(60)
+                print(String(format: "Suggest %.1fs: …%@[%@]%@  (raw %@)", Date().timeIntervalSince(t), String(shown), picked, c.after, raw.replacingOccurrences(of: "\n", with: " ")))
             }
             return true
         } catch {
@@ -278,4 +310,29 @@ enum SelfTest {
             return false
         }
     }
+
+    /// Realistic autocomplete cases for --localtest: (app, window, text before, text after).
+    struct CompletionCase { var app: String; var window: String; var before: String; var after = "" }
+    static let completionCases: [CompletionCase] = [
+        .init(app: "Mail", window: "Re: Project update", before: "Let me know if you have any"),
+        .init(app: "Mail", window: "Re: Project update", before: "Thanks for the upd"),
+        .init(app: "Slack", window: "design-team", before: "We still don't know how they did it. Let's ask"),
+        .init(app: "Slack", window: "Priya Shah", before: "hey, are you free later today? i wanted to go over the"),
+        .init(app: "Slack", window: "Priya Shah", before: "sounds good! i'll ping you when i'm"),
+        .init(app: "Mail", window: "Re: Q3 budget", before: "Hi Priya,\n\nThanks for sending over the Q3 budget. I had a quick look and I think we can cut the marketing spend. Could we set up a call to discuss the"),
+        .init(app: "Mail", window: "Offsite", before: "Hi team,\n\nJust a quick reminder that the offsite is next Thursday. Please make sure to"),
+        .init(app: "Notion", window: "Postmortem", before: "The main reason we switched to Postgres was performance. Our queries were taking too"),
+        .init(app: "Google Docs", window: "Paper draft", before: "In this paper, we propose a novel approach to"),
+        .init(app: "Mail", window: "Automatic reply", before: "I'm out of the office until Monday with limited access to"),
+        .init(app: "Messages", window: "Sam", before: "omg congrats on the new job!! when do you"),
+        .init(app: "Mail", window: "Invoice", before: "Hi Tom,\n\nPlease find the attached invo"),
+        .init(app: "Pages", window: "Brand notes", before: "We still need to finalise the colour palette and organi"),
+        .init(app: "Slack", window: "Priya Shah", before: "Can you ", after: " the meeting to 3pm?"),
+        .init(app: "Mail", window: "Re: Support request", before: "Thank you for your patience while we looked into this. Unfortunately, we"),
+        .init(app: "Mail", window: "Re: Project update", before: "If you have any questions,"),
+        .init(app: "Mail", window: "Re: Catching up", before: "Apologies for the delay in getting back to you, I've been"),
+        .init(app: "Mail", window: "Re: Contract", before: "The contract renewal is due on"),
+        .init(app: "Notes", window: "Groceries", before: "Groceries: eggs, milk, bread,"),
+        .init(app: "Safari", window: "Inbox (3) - Gmail", before: "Hi Alex, I hope you're"),
+    ]
 }

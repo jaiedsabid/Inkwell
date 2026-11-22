@@ -224,17 +224,53 @@ enum CheckPrompt {
         var issues: [Item]
     }
 
+    /// Models often label a rewording as spelling or grammar. The label is checked against what actually changes:
+    /// spelling only when the word really is misspelled; a correctly spelled word swapped for a look-alike or another
+    /// form ("then" → "than", "go" → "went") is grammar; a different phrase with the same meaning ("waiting for" →
+    /// "looking forward to") is a clarity improvement.
+    static func verifiedKind(_ kind: IssueKind, original: String, replacement: String) -> IssueKind {
+        guard kind == .spelling || kind == .grammar || kind == .capitalization else { return kind }
+        let a = WordDiff.words(original).map(\.word), b = WordDiff.words(replacement).map(\.word)
+        let letters = { (s: String) in s.lowercased().filter(\.isLetter) }
+        if kind == .capitalization { return letters(original) == letters(replacement) ? kind : verifiedKind(.spelling, original: original, replacement: replacement) }
+        let misspelled = a.contains { !WordDiff.isWord($0) }
+        if kind == .spelling, misspelled { return .spelling }
+        // Same letters, other spacing or apostrophes ("alot" → "a lot", "its" → "it's"): a real fix, keep it.
+        if letters(original) == letters(replacement) { return kind }
+        let shared = Set(a.map { $0.lowercased() }).intersection(b.map { $0.lowercased() })
+        let lookAlike = a.count == 1 && b.count == 1 && (WordDiff.sameRoot(a[0], b[0]) || editDistance(a[0].lowercased(), b[0].lowercased()) <= 2)
+        if lookAlike || !shared.isEmpty || a.count == 1 && b.count == 1 && a[0].count <= 3 { return misspelled ? .spelling : .grammar }
+        return .clarity
+    }
+
+    static func editDistance(_ a: String, _ b: String) -> Int {
+        let a = Array(a), b = Array(b)
+        guard !a.isEmpty else { return b.count }
+        guard !b.isEmpty else { return a.count }
+        var row = Array(0...b.count)
+        for i in 1...a.count {
+            var prev = row[0]; row[0] = i
+            for j in 1...b.count {
+                let cur = row[j]
+                row[j] = min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] == b[j - 1] ? 0 : 1))
+                prev = cur
+            }
+        }
+        return row[b.count]
+    }
+
     /// Parses the reply and locates each issue in its sentence. Unlocatable or no-op issues are dropped.
     static func parse(_ raw: String, sentences: [Int: String]) -> [Int: [LocalIssue]]? {
         guard let data = extractJSONObject(raw), let reply = try? JSONDecoder().decode(Reply.self, from: data) else { return nil }
         var out: [Int: [LocalIssue]] = [:]
         for id in sentences.keys { out[id] = [] }
         for item in reply.issues {
-            guard let text = sentences[item.sentence], let kind = IssueKind(rawValue: item.kind) else { continue }
+            guard let text = sentences[item.sentence], var kind = IssueKind(rawValue: item.kind) else { continue }
             let original = item.original, replacement = item.replacement
             guard original != replacement, let r = TextTools.locate(original, in: text) else { continue }
             let explanation = item.explanation.trimmingCharacters(in: .whitespacesAndNewlines)
             let found = (text as NSString).substring(with: r)
+            if !kind.isSentenceLevel { kind = verifiedKind(kind, original: found, replacement: replacement) }
             if kind.isSentenceLevel {
                 let chunks = WordDiff.changes(from: found, to: replacement)
                 if chunks.isEmpty { continue }
