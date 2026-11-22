@@ -1,17 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="200 322 662 474" width="662" height="474">
-  <defs>
-    <mask id="cut" maskUnits="userSpaceOnUse" x="-600" y="-600" width="2200" height="2200">
-      <rect x="-600" y="-600" width="2200" height="2200" fill="#fff"/>
-      <line x1="512" y1="468" x2="512" y2="740" stroke="#000" stroke-width="40"/>
-      <circle cx="512" cy="468" r="50" fill="#000"/>
-      <line x1="380" y1="300" x2="644" y2="300" stroke="#000" stroke-width="36"/>
-    </mask>
-  </defs>
-  <g transform="translate(506 736) rotate(38) scale(0.9) translate(-512 -726)">
-      <g mask="url(#cut)">
-        <path fill="#000" d="M420 250 L604 250 C640 290 664 340 664 420 C600 500 530 640 512 726 C494 640 424 500 360 420 C360 340 384 290 420 250 Z"/>
-        
-      </g>
-  </g>
-  <path d="M232 764 q24 -29 48 0 t48 0 t48 0 t48 0 t48 0 q12 -14 26 -26" fill="none" stroke="#000" stroke-width="54" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="662" height="474" viewBox="200 322 662 474"><defs><mask id="cut" width="2200" height="2200" x="-600" y="-600" maskUnits="userSpaceOnUse"><rect width="2200" height="2200" x="-600" y="-600" fill="#fff"/><line x1="512" x2="512" y1="468" y2="740" stroke="#000" stroke-width="40"/><circle cx="512" cy="468" r="50" fill="#000"/><line x1="380" x2="644" y1="300" y2="300" stroke="#000" stroke-width="36"/></mask></defs><g><g mask="url(#cut)" transform="translate(506 736) rotate(38) scale(0.9) translate(-512 -726)"><path fill="#000" d="M420 250 L604 250 C640 290 664 340 664 420 C600 500 530 640 512 726 C494 640 424 500 360 420 C360 340 384 290 420 250 Z"/></g></g><path fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="54" d="M232 764 q24 -29 48 0 t48 0 t48 0 t48 0 t48 0 q12 -14 26 -26"/></svg>
