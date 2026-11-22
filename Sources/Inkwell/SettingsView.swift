@@ -102,11 +102,11 @@ struct GeneralPane: View {
                 Toggle("Open Inkwell when I log in", isOn: Binding(get: { settings.launchAtLogin }, set: { settings.launchAtLogin = $0 }))
             }
             Section("Shortcut") {
-                Picker(selection: $settings.hotkey) {
-                    ForEach(HotkeyPreset.allCases) { Text($0.label).tag($0) }
+                LabeledContent {
+                    ShortcutRecorder(shortcut: $settings.hotkey)
                 } label: {
                     Text("Improve selected text")
-                    Text("Select text in any app and press this to open the chat panel.")
+                    Text("Select text in any app and press this to open the chat panel. Click the shortcut to change it.")
                 }
             }
             Section("Checking") {
@@ -827,5 +827,86 @@ struct ModelField: View {
             .frame(maxHeight: 320)
         }
         .frame(width: 320)
+    }
+}
+
+/// Click, then press the keys you want. Esc cancels.
+struct ShortcutRecorder: View {
+    @Binding var shortcut: Shortcut
+    @StateObject private var rec = ShortcutRecording()
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack(spacing: 6) {
+                if shortcut != .default && !rec.recording {
+                    Button { rec.set(.default, into: $shortcut) } label: { Image(systemName: "arrow.counterclockwise") }
+                        .buttonStyle(.borderless).help("Use the default, \(Shortcut.default.label)")
+                }
+                Button { rec.recording ? rec.stop() : rec.start(into: $shortcut) } label: {
+                    HStack(spacing: 6) {
+                        if rec.recording {
+                            Circle().fill(Theme.accent).frame(width: 6, height: 6)
+                        }
+                        Text(rec.recording ? "Type a shortcut…" : shortcut.label)
+                            .font(.system(size: 12, weight: rec.recording ? .regular : .medium)).monospacedDigit()
+                            .foregroundStyle(.primary)
+                    }
+                    .frame(minWidth: 120)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(rec.recording ? Theme.accent.opacity(0.12) : Color(nsColor: .controlColor)))
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(rec.recording ? Theme.accent : Color(nsColor: .separatorColor), lineWidth: rec.recording ? 1.5 : 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .help(rec.recording ? "Press Esc to cancel" : "Click to change")
+            }
+            if let error = rec.error { Text(error).font(.caption).foregroundStyle(.red) }
+        }
+        .onDisappear { rec.stop() }
+    }
+}
+
+@MainActor
+final class ShortcutRecording: ObservableObject {
+    @Published var recording = false
+    @Published var error: String?
+    private var monitor: Any?
+
+    func start(into binding: Binding<Shortcut>) {
+        error = nil
+        recording = true
+        Hotkey.shared.suspend()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            if event.keyCode == 53 { self.stop(); return nil }          // Esc
+            guard let s = Shortcut(event: event) else {
+                self.error = "Use at least one of ⌘, ⌥ or ⌃."
+                return nil
+            }
+            self.set(s, into: binding)
+            self.stop()
+            return nil
+        }
+    }
+
+    func stop() {
+        guard recording || monitor != nil else { return }
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        recording = false
+        Hotkey.shared.resume()
+    }
+
+    func set(_ s: Shortcut, into binding: Binding<Shortcut>) {
+        let old = binding.wrappedValue
+        guard Hotkey.shared.register(s) else {
+            error = "\(s.label) is used by another app. Try a different one."
+            Hotkey.shared.register(old)
+            return
+        }
+        error = nil
+        binding.wrappedValue = s
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import ServiceManagement
 
 enum EngineKind: String, CaseIterable, Codable, Identifiable {
@@ -78,17 +79,78 @@ struct ModelChoice: Codable, Equatable {
     var chat: String
 }
 
-enum HotkeyPreset: String, CaseIterable, Codable, Identifiable {
-    case optionSpace, ctrlOptionSpace, cmdShiftSpace, ctrlOptionI
-    var id: String { rawValue }
+/// The "improve selected text" shortcut: a key plus Carbon modifier flags (cmdKey, optionKey, controlKey, shiftKey).
+struct Shortcut: Codable, Equatable {
+    var keyCode: UInt32
+    var modifiers: UInt32
+    /// What the key shows as, e.g. "Space" or "I".
+    var key: String
+
+    static let `default` = Shortcut(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey), key: "Space")
+
     var label: String {
-        switch self {
-        case .optionSpace: "⌥ Space"
-        case .ctrlOptionSpace: "⌃⌥ Space"
-        case .cmdShiftSpace: "⇧⌘ Space"
-        case .ctrlOptionI: "⌃⌥ I"
-        }
+        var s = ""
+        if modifiers & UInt32(controlKey) != 0 { s += "⌃" }
+        if modifiers & UInt32(optionKey) != 0 { s += "⌥" }
+        if modifiers & UInt32(shiftKey) != 0 { s += "⇧" }
+        if modifiers & UInt32(cmdKey) != 0 { s += "⌘" }
+        return key.count > 1 ? s + " " + key : s + key
     }
+
+    init(keyCode: UInt32, modifiers: UInt32, key: String) {
+        self.keyCode = keyCode; self.modifiers = modifiers; self.key = key
+    }
+
+    private enum CodingKeys: String, CodingKey { case keyCode, modifiers, key }
+
+    /// Also reads the fixed choices older versions saved ("optionSpace", …).
+    init(from decoder: Decoder) throws {
+        if let old = try? decoder.singleValueContainer().decode(String.self) {
+            switch old {
+            case "ctrlOptionSpace": self.init(keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey), key: "Space")
+            case "cmdShiftSpace": self.init(keyCode: UInt32(kVK_Space), modifiers: UInt32(cmdKey | shiftKey), key: "Space")
+            case "ctrlOptionI": self.init(keyCode: UInt32(kVK_ANSI_I), modifiers: UInt32(controlKey | optionKey), key: "I")
+            default: self = .default
+            }
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(keyCode: try c.decode(UInt32.self, forKey: .keyCode), modifiers: try c.decode(UInt32.self, forKey: .modifiers),
+                  key: try c.decode(String.self, forKey: .key))
+    }
+
+    /// Builds a shortcut from a key press. Needs ⌘, ⌥ or ⌃ (⇧ alone would block typing), except for F-keys.
+    init?(event: NSEvent) {
+        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        let code = Int(event.keyCode)
+        let fKey = Self.fKeys[code]
+        guard fKey != nil || !flags.intersection([.command, .option, .control]).isEmpty else { return nil }
+        var mods = 0
+        if flags.contains(.command) { mods |= cmdKey }
+        if flags.contains(.option) { mods |= optionKey }
+        if flags.contains(.control) { mods |= controlKey }
+        if flags.contains(.shift) { mods |= shiftKey }
+        let name = fKey ?? Self.named[code] ?? Self.character(for: event)
+        guard let name, !name.isEmpty else { return nil }
+        self.init(keyCode: UInt32(code), modifiers: UInt32(mods), key: name)
+    }
+
+    private static func character(for event: NSEvent) -> String? {
+        // ⌥ changes the character ("π" for P), so read the key without modifiers.
+        guard let c = event.charactersIgnoringModifiers?.uppercased(), let first = c.unicodeScalars.first,
+              !CharacterSet.controlCharacters.contains(first) else { return nil }
+        return c
+    }
+
+    private static let named: [Int: String] = [
+        kVK_Space: "Space", kVK_Return: "Return", kVK_Tab: "Tab", kVK_Delete: "Delete", kVK_ForwardDelete: "⌦",
+        kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
+        kVK_Home: "Home", kVK_End: "End", kVK_PageUp: "Page Up", kVK_PageDown: "Page Down",
+    ]
+    private static let fKeys: [Int: String] = [
+        kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8",
+        kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12", kVK_F13: "F13", kVK_F14: "F14", kVK_F15: "F15",
+    ]
 }
 
 /// All user settings, saved in UserDefaults as they change.
@@ -100,7 +162,7 @@ final class AppSettings: ObservableObject {
     // General
     @Published var enabled: Bool { didSet { save("enabled", enabled) } }
     @Published var pausedUntil: Date? { didSet { save("pausedUntil", pausedUntil) } }
-    @Published var hotkey: HotkeyPreset { didSet { save("hotkey", hotkey) } }
+    @Published var hotkey: Shortcut { didSet { save("hotkey", hotkey) } }
     @Published var checkDelay: Double { didSet { save("checkDelay", checkDelay) } }
     @Published var onboarded: Bool { didSet { save("onboarded", onboarded) } }
 
@@ -171,7 +233,7 @@ final class AppSettings: ObservableObject {
         }
         enabled = load("enabled", true)
         pausedUntil = load("pausedUntil", nil as Date?)
-        hotkey = load("hotkey", .optionSpace)
+        hotkey = load("hotkey", Shortcut.default)
         checkDelay = load("checkDelay", 0.7)
         onboarded = load("onboarded", false)
         languageCode = load("languageCode", Self.defaultLanguage())

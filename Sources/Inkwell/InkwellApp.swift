@@ -118,8 +118,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func present(_ w: NSWindow) {
         StatusMenu.shared.close()
+        // While a window is open, show in the Dock and ⌘Tab like a normal app; back to menu bar only once it closes.
+        NSApp.setActivationPolicy(.regular)
+        watchClose(w)
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
         w.orderFrontRegardless()
+    }
+
+    private var watched = Set<ObjectIdentifier>()
+
+    private func watchClose(_ w: NSWindow) {
+        guard watched.insert(ObjectIdentifier(w)).inserted else { return }
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.windowClosed(w) }
+        }
+    }
+
+    private func windowClosed(_ closing: NSWindow) {
+        let others = [settingsWindow, onboardingWindow].compactMap { $0 }.filter { $0 !== closing && ($0.isVisible || $0.isMiniaturized) }
+        guard others.isEmpty else { return }
+        NSApp.setActivationPolicy(.accessory)
     }
 }
