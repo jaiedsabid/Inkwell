@@ -1,18 +1,21 @@
 #!/bin/bash
-# Makes an Inkwell release.
+# Makes an Inkwell release. main is protected (no direct pushes), so a release goes through a pull request.
 #
-#   scripts/release.sh 0.2.0            prepare: version, changelog, commit, tag, build the DMG (nothing leaves this Mac)
-#   scripts/release.sh 0.2.0 --publish  same, then push main and the tag and create the GitHub release with the DMG
+#   scripts/release.sh 0.2.0            prepare: on a release/0.2.0 branch, update the changelog and VERSION, commit, and build
+#                                       and sign the DMG and the update feed (nothing leaves this Mac)
+#   scripts/release.sh 0.2.0 --publish  same, then push the branch, open a PR, squash-merge it into main, tag the merged
+#                                       commit v0.2.0 and create the GitHub release with the DMG and appcast.xml
 #   scripts/release.sh 0.2.0 --publish-only   publish a release prepared earlier
 #
-# Before running it, list the changes under "## [Unreleased]" in CHANGELOG.md. The script moves them under the new
-# version with today's date, so the release notes are exactly that section.
+# Before running it, list the changes under "## [Unreleased]" in CHANGELOG.md and get them onto main (by PR). The script
+# moves them under the new version with today's date, so the release notes are exactly that section.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="${1:-}"
 MODE="${2:-}"
 TAG="v$VERSION"
+BRANCH="release/$VERSION"
 DMG="dist/Inkwell-$VERSION.dmg"
 REPO="${INKWELL_REPO:-jaiedsabid/Inkwell}"
 
@@ -28,11 +31,28 @@ notes() { awk -v v="$1" '
 
 publish() {
     command -v gh >/dev/null || die "the GitHub CLI (gh) is needed to publish"
-    git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || die "tag $TAG doesn't exist; prepare the release first"
+    git show-ref -q "refs/heads/$BRANCH" || die "branch $BRANCH doesn't exist; prepare the release first"
+    git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && die "tag $TAG already exists"
     [ -f "$DMG" ] || die "$DMG is missing; prepare the release first"
     grep -q "Inkwell-$VERSION.dmg" dist/appcast.xml 2>/dev/null || die "dist/appcast.xml isn't for $VERSION; prepare the release first"
-    git push origin main
-    git push origin "$TAG"
+    local tree; tree="$(git rev-parse "$BRANCH^{tree}")"
+
+    # Into main by pull request.
+    git push -q -u origin "$BRANCH"
+    if ! gh pr view "$BRANCH" --repo "$REPO" >/dev/null 2>&1; then
+        local prbody; prbody="$(mktemp)"; notes "$VERSION" > "$prbody"
+        gh pr create --repo "$REPO" --base main --head "$BRANCH" --title "Release $VERSION" --body-file "$prbody"
+        rm -f "$prbody"
+    fi
+    gh pr merge "$BRANCH" --repo "$REPO" --squash --delete-branch --subject "Release $VERSION" --body ""
+    git checkout -q main
+    git pull -q --ff-only origin main
+    # The DMG was built from the release branch: main must now hold exactly that tree.
+    [ "$(git rev-parse 'HEAD^{tree}')" == "$tree" ] || die "main after the merge differs from $BRANCH; rebuild with scripts/release.sh $VERSION"
+    git branch -q -D "$BRANCH" 2>/dev/null || true
+    git tag -a "$TAG" -m "Inkwell $VERSION"
+    git push -q origin "$TAG"
+
     local body; body="$(mktemp)"
     {
         notes "$VERSION"
@@ -54,9 +74,13 @@ publish() {
 
 if [ "$MODE" == "--publish-only" ]; then publish; exit 0; fi
 
-[ "$(git branch --show-current)" == "main" ] || die "releases are made from main"
+[ "$(git branch --show-current)" == "main" ] || die "start a release from main"
 [ -z "$(git status --porcelain)" ] || die "commit or stash your changes first"
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && die "tag $TAG already exists"
+git fetch -q origin main
+[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ] || die "main isn't the same as origin/main; pull (or merge your PRs) first"
+git show-ref -q "refs/heads/$BRANCH" && die "branch $BRANCH already exists; delete it or use --publish-only"
+git checkout -q -b "$BRANCH"
 
 # Changelog: Unreleased → this version, with a fresh empty Unreleased section on top.
 grep -q '^## \[Unreleased\]' CHANGELOG.md || die "CHANGELOG.md has no ## [Unreleased] section"
@@ -81,10 +105,10 @@ mv CHANGELOG.md.tmp CHANGELOG.md
 
 echo "$VERSION" > VERSION
 git add VERSION CHANGELOG.md
-git commit -m "Release $VERSION"
-git tag -a "$TAG" -m "Inkwell $VERSION"
+git commit -q -m "Release $VERSION"
 
-# Build number: the commit count, so it always goes up (Sparkle compares it to decide what's newer).
+# Build number: the commit count, so it always goes up (Sparkle compares it to decide what's newer). The squash merge
+# adds exactly one commit to main, so main has the same count once the release is merged.
 BUILD="$(git rev-list --count HEAD)"
 INKWELL_VERSION="$VERSION" INKWELL_BUILD="$BUILD" ./build.sh
 mv dist/Inkwell.dmg "$DMG"
@@ -102,7 +126,7 @@ NOTES_FILE="$(mktemp)"; notes "$VERSION" > "$NOTES_FILE"
 scripts/appcast.py "$VERSION" "$BUILD" "$DMG" "$ED_SIG" "$LENGTH" "$NOTES_FILE" dist/appcast.xml "$REPO"
 rm -f "$NOTES_FILE"
 echo "Update feed: dist/appcast.xml (build $BUILD)"
-echo "Prepared $TAG: $DMG"
+echo "Prepared $VERSION on $BRANCH: $DMG"
 echo "Notes:"; notes "$VERSION"
 
 if [ "$MODE" == "--publish" ]; then publish
